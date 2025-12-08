@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zoneout"
+version = "0.1.0"
+description = "Unofficial Linux Controller for Sony InZone H9-series Gaming Headsets"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "hidapi>=0.14.0",
+]
+
+[project.scripts]
+zoneout = "zoneout.cli:main"
+
+[project.urls]
+"Homepage" = "https://github.com/mjakubowski/zoneout"
+"Bug Tracker" = "https://github.com/mjakubowski/zoneout/issues"
