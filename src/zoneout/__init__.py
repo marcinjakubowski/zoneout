@@ -5,7 +5,6 @@ from .models import (
     AudioStatus, NcStatus, SystemStatus, HeadsetFullStatus, HeadsetEvent, PowerState
 )
 
-# Define what is available when someone does 'from zoneout import *'
 __all__ = [
     "ZoneHeadset",
     "ZoneError",

@@ -14,7 +14,7 @@ from .models import (
 class ZoneHeadset:
     def __init__(self) -> None:
         self.device: Optional[Any] = None
-        self.seq: int = 1  # Rolling sequence counter
+        self.seq: int = 1  
 
     def connect(self) -> None:
         try:
@@ -38,8 +38,6 @@ class ZoneHeadset:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
-
-    # --- Low Level Protocol ---
 
     def _send_cmd(self, setting_key: str, value: Union[int, Tuple[int, ...]]) -> None:
         if setting_key not in protocol.WRITE_MAP:
@@ -80,7 +78,6 @@ class ZoneHeadset:
 
         self.seq = (self.seq + 1) if self.seq < 255 else 1
 
-        # Aggressive flush of any immediate response/echo
         try:
             if self.device:
                 self.device.read(64, timeout_ms=20)
@@ -90,43 +87,32 @@ class ZoneHeadset:
     def _get_report(self, cmd_id: int, retries: int = 10) -> List[int]:
         req = bytearray(64)
 
-        # Calculate Checksum for Read Request
-        # Observed pattern:
-        # Req 06 (Audio): Checksum A2 (06 + 9C = A2)
-        # Req 07 (NC):    Checksum A3 (07 + 9C = A3)
-        # Req 08 (Sys):   Checksum A4 (08 + 9C = A4)
         read_checksum = (cmd_id + 0x9C) & 0xFF
 
         header = bytes([
             protocol.REPORT_ID, 0x0C, 0x01, 0x00, 0xFC, 0x08,
             protocol.MAGIC_1, protocol.MAGIC_2, 0x41, cmd_id,
-            0x01, 0x01, 0x00, read_checksum  # Mode=1, Seq=1, Val=0, Checksum
+            0x01, 0x01, 0x00, read_checksum  
         ])
         req[0:len(header)] = header
 
         if not self.device:
             raise DeviceNotFoundError("Device not connected")
 
-        # flush
         while True:
             d = self.device.read(64, timeout_ms=10)
             if not d: break
 
-        # send
         self.device.write(req)
 
-        # read
         for _ in range(retries):
             data = self.device.read(64, timeout_ms=15)
             if not data: continue
 
-            # Check length and Command ID (Byte 9)
             if len(data) >= 64 and data[9] == cmd_id:
                 return data
 
         raise ProtocolError(f"Timeout waiting for Report CMD {hex(cmd_id)}")
-
-    # --- Public API: Setters ---
 
     def set_volume(self, value: int) -> None:
         self._send_cmd('volume', max(0, min(30, int(value))))
@@ -168,12 +154,9 @@ class ZoneHeadset:
         """Helper for CLI: sets focus with Level=20 (Max)"""
         self.set_ambient_sound(20, bool(focus))
 
-    # --- Public API: Getters (Typed) ---
-
     def get_audio_status(self) -> AudioStatus:
         data = self._get_report(protocol.REQ_AUDIO_STATUS)
-        # Byte 22 is an internal state checksum, ignored.
-
+        
         return AudioStatus(
             volume=data[17],
             balance=data[19],
@@ -210,8 +193,6 @@ class ZoneHeadset:
             system=self.get_system_status()
         )
 
-    # --- Public API: Event Listener ---
-
     def listen(self) -> Generator[HeadsetEvent, None, None]:
         """Yields typed HeadsetEvent objects."""
         if not self.device:
@@ -243,7 +224,6 @@ class ZoneHeadset:
                     yield HeadsetEvent(EventType.MIC_MUTE, bool(data[13]))
 
                 elif cmd == protocol.EVT_MIC_CONN:
-                    # 0=Connected, 1=Disconnected
                     yield HeadsetEvent(EventType.MIC_CONN, data[13] == 0)
 
                 elif cmd == protocol.EVT_BT_STATE:

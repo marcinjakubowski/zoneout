@@ -5,8 +5,7 @@ from .device import ZoneHeadset
 from .exceptions import DeviceNotFoundError
 from .models import NcMode, BootNcMode, BootBtMode, Language
 
-# Value: (Category Attribute, Field Name, Setter Method Name)
-# Key: str, Value: Tuple[str, str, Optional[str]]
+
 VAR_MAP: Dict[str, Tuple[str, str, Optional[str]]] = {
     'volume': ('audio', 'volume', 'set_volume'),
     'balance': ('audio', 'balance', 'set_balance'),
@@ -54,15 +53,12 @@ VARIABLES & ALLOWED VALUES:
   mic_connected (0/1)
 """
 
-
 def format_value(value: Any) -> str:
     if isinstance(value, (NcMode, BootNcMode, BootBtMode, Language)):
-        # Enum .name is str, .value is int
         return f"{value.value} ({value.name.replace('_', ' ').title()})"
     if isinstance(value, bool):
         return "On" if value else "Off"
     return str(value)
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -81,8 +77,6 @@ def main() -> None:
 
     try:
         with ZoneHeadset() as headset:
-
-            # --- GET ALL ---
             if args.get_all:
                 status = headset.get_all_data()
 
@@ -107,7 +101,6 @@ def main() -> None:
                 print(f"Boot Default (NC):  {format_value(status.system.boot_nc)}")
                 print(f"Boot Default (BT):  {format_value(status.system.boot_bt)}")
 
-            # --- GET SINGLE ---
             elif args.get:
                 status = headset.get_all_data()
                 cat_attr, field_name, _ = VAR_MAP[args.get]
@@ -115,7 +108,6 @@ def main() -> None:
                 val = getattr(category, field_name)
                 print(val.value if hasattr(val, 'value') else int(val))
 
-            # --- SET ---
             elif args.set:
                 for var_name, val_str in args.set:
                     if var_name not in VAR_MAP:
@@ -139,7 +131,6 @@ def main() -> None:
                     getattr(headset, setter_name)(value)
                     print(f"Set {var_name} -> {value}")
 
-            # --- MONITOR ---
             elif args.monitor:
                 print("Listening for headset events (Ctrl+C to stop)...")
                 try:

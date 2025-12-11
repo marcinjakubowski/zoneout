@@ -3,8 +3,6 @@ from enum import IntEnum, Enum
 from typing import Union
 
 
-# --- Enums for Readability ---
-
 class NcMode(IntEnum):
     OFF = 0
     NOISE_CANCELLING = 1
@@ -39,8 +37,6 @@ class EventType(Enum):
     MIC_CONN = "mic_connected"
     BLUETOOTH = "bluetooth"
 
-
-# --- Data Containers ---
 
 @dataclass
 class PowerState:

@@ -1,4 +1,3 @@
-import threading
 import time
 from typing import Optional
 
@@ -13,7 +12,7 @@ from zoneout.exceptions import DeviceNotFoundError
 
 
 class MonitorThread(QThread):
-    event_received = pyqtSignal(object)  # HeadsetEvent
+    event_received = pyqtSignal(object)  
     connection_lost = pyqtSignal(str)
 
     def __init__(self, headset: ZoneHeadset):
@@ -24,7 +23,6 @@ class MonitorThread(QThread):
     def run(self):
         while self._running:
             try:
-                # The listen generator yields events indefinitely
                 for event in self.headset.listen():
                     if not self._running:
                         break
@@ -36,7 +34,6 @@ class MonitorThread(QThread):
                 self.connection_lost.emit(str(e))
                 break
             
-            # If listen returns/breaks but thread is still running (shouldn't happen with current listen impl), sleep briefly
             time.sleep(1)
 
     def stop(self):
@@ -44,9 +41,7 @@ class MonitorThread(QThread):
         self.quit()
         self.wait()
 
-
 class HeadsetController(QObject):
-    # Signals for properties
     volumeChanged = pyqtSignal(int)
     balanceChanged = pyqtSignal(int)
     sidetoneChanged = pyqtSignal(int)
@@ -59,7 +54,6 @@ class HeadsetController(QObject):
     ambientLevelChanged = pyqtSignal(int)
     focusOnVoiceChanged = pyqtSignal(bool)
     
-    # Read-only status signals
     batteryLevelChanged = pyqtSignal(int)
     isChargingChanged = pyqtSignal(bool)
     micMutedChanged = pyqtSignal(bool)
@@ -67,10 +61,8 @@ class HeadsetController(QObject):
     bluetoothConnectedChanged = pyqtSignal(bool)
     bluetoothEnabledChanged = pyqtSignal(bool)
     
-    # Notification signal: title, message
     notificationRequested = pyqtSignal(str, str)
     
-    # Connection status
     connectionStatusChanged = pyqtSignal(bool, str)
     usbConnectedChanged = pyqtSignal(bool)
 
@@ -79,12 +71,10 @@ class HeadsetController(QObject):
         self._headset: Optional[ZoneHeadset] = None
         self._monitor_thread: Optional[MonitorThread] = None
         
-        # Auto-retry timer
         self._retry_timer = QTimer(self)
-        self._retry_timer.setInterval(5000) # 5 seconds
+        self._retry_timer.setInterval(5000) 
         self._retry_timer.timeout.connect(self.connect_device)
         
-        # State variables
         self._volume = 0
         self._balance = 50
         self._sidetone = 0
@@ -108,11 +98,9 @@ class HeadsetController(QObject):
         
         self._settings = QSettings("ZoneOut", "HeadsetSettings")
         
-        # Notification logic state
         self._low_battery_notified = False
         self._user_battery_threshold = int(self._settings.value("notifications/batteryThreshold", 20))
         
-        # New notification flags
         self._notify_mic_mute = self._settings.value("notifications/micMute", True, type=bool)
         self._notify_mic_connect = self._settings.value("notifications/micConnect", True, type=bool)
         self._notify_bt_connect = self._settings.value("notifications/btConnect", True, type=bool)
@@ -121,7 +109,6 @@ class HeadsetController(QObject):
         self._notify_charging = self._settings.value("notifications/charging", True, type=bool)
         self._notify_nc = self._settings.value("notifications/nc", True, type=bool)
         
-        # Try to connect immediately (deferred to allow signal connection)
         QTimer.singleShot(0, self.connect_device)
 
     def connect_device(self):
@@ -129,7 +116,6 @@ class HeadsetController(QObject):
             self._headset = ZoneHeadset()
             self._headset.connect()
             
-            # Connection successful
             if self._retry_timer.isActive():
                 self._retry_timer.stop()
                 
@@ -143,7 +129,6 @@ class HeadsetController(QObject):
             self.usbConnectedChanged.emit(False)
             self.connectionStatusChanged.emit(False, str(e))
             
-            # Start retry timer if not already running
             if not self._retry_timer.isActive():
                 self._retry_timer.start()
 
@@ -153,19 +138,16 @@ class HeadsetController(QObject):
             
         status = self._headset.get_all_data()
         
-        # Audio
         self._update_volume(status.audio.volume)
         self._update_balance(status.audio.balance)
         self._update_sidetone(status.audio.sidetone)
         self._update_battery(status.audio.battery_level, status.audio.charging)
         
-        # NC
         self._update_nc_mode(status.nc.nc_mode)
         self._update_mic_mute(status.nc.mic_muted)
         self._update_ambient_level(status.nc.ambient_level)
         self._update_focus_on_voice(status.nc.focus_on_voice)
         
-        # System
         self._update_auto_off(status.system.auto_off_minutes)
         self._update_language(status.system.language)
         self._update_notif_sound(status.system.notif_enabled)
@@ -191,7 +173,6 @@ class HeadsetController(QObject):
         self._headset = None
         self._low_battery_notified = False
         
-        # Start retry timer
         if not self._retry_timer.isActive():
             self._retry_timer.start()
 
@@ -205,7 +186,6 @@ class HeadsetController(QObject):
         elif event.type == EventType.BALANCE:
             self._update_balance(event.value)
         elif event.type == EventType.NC_MODE:
-            # Only notify if the mode actually changed
             if self._nc_mode != event.value:
                 self._update_nc_mode(event.value)
                 if self._notify_nc:
@@ -213,7 +193,6 @@ class HeadsetController(QObject):
                     mode_str = modes.get(event.value, "Unknown")
                     self.notificationRequested.emit("Noise Control", mode_str)
             else:
-                 # Update internal state silently if needed (though mode didn't change integer)
                  self._update_nc_mode(event.value)
         elif event.type == EventType.MIC_MUTE:
             if self._mic_muted != event.value:
@@ -228,7 +207,6 @@ class HeadsetController(QObject):
         elif event.type == EventType.POWER:
             self._update_battery(event.value.battery_level, event.value.charging)
         elif event.type == EventType.BLUETOOTH:
-            # Check for changes
             conn_changed = (self._bt_connected != event.value.connected)
             enabled_changed = (self._bt_enabled != event.value.enabled)
             
@@ -242,9 +220,6 @@ class HeadsetController(QObject):
                 if self._notify_bt_toggle and enabled_changed:
                    self.notificationRequested.emit("Bluetooth", "Disabled")
 
-    # --- Property Updaters (Internal) ---
-    # Only emit if changed to avoid loop
-    
     def _update_volume(self, val):
         if self._volume != val:
             self._volume = val
@@ -265,12 +240,11 @@ class HeadsetController(QObject):
             self._battery_level = level
             self.batteryLevelChanged.emit(level)
             
-            # Low battery check
             if self._notify_battery and not charging and level <= self._user_battery_threshold and not self._low_battery_notified:
                 self.notificationRequested.emit("Low Battery", f"Battery is at {level}%")
                 self._low_battery_notified = True
             elif level > self._user_battery_threshold:
-                self._low_battery_notified = False # Reset if charged above
+                self._low_battery_notified = False 
                 
         if self._is_charging != charging:
             self._is_charging = charging
@@ -338,8 +312,6 @@ class HeadsetController(QObject):
             self._boot_bt = int(val)
             self.bootBtModeChanged.emit(self._boot_bt)
 
-    # --- Properties and Setters (Public) ---
-
     @pyqtProperty(int, notify=volumeChanged)
     def volume(self): return self._volume
     
@@ -347,7 +319,7 @@ class HeadsetController(QObject):
     def setVolume(self, val):
         if self._headset:
             self._headset.set_volume(val)
-        # Optimistic update
+        
         self._update_volume(val)
 
     @pyqtProperty(int, notify=balanceChanged)
@@ -376,7 +348,7 @@ class HeadsetController(QObject):
                 self._headset.set_ambient_sound(self._ambient_level, self._focus_on_voice)
             else:
                 self._headset.set_noise_cancelling(val)
-        # Optimistic update
+        
         self._update_nc_mode(val)
 
     @pyqtProperty(int, notify=ambientLevelChanged)
@@ -388,7 +360,7 @@ class HeadsetController(QObject):
         self.ambientLevelChanged.emit(val)
         if self._headset:
             self._headset.set_ambient_sound(self._ambient_level, self._focus_on_voice)
-            # Implicitly switches to Ambient, so update mode optimistic
+            
             self._update_nc_mode(2)
 
     @pyqtProperty(bool, notify=focusOnVoiceChanged)
@@ -400,7 +372,7 @@ class HeadsetController(QObject):
         self.focusOnVoiceChanged.emit(val)
         if self._headset:
             self._headset.set_ambient_sound(self._ambient_level, self._focus_on_voice)
-            # Implicitly switches to Ambient
+            
             self._update_nc_mode(2)
 
     @pyqtProperty(int, notify=autoPowerOffChanged)
@@ -438,7 +410,6 @@ class HeadsetController(QObject):
     def setBootBtMode(self, val):
         if self._headset: self._headset.set_boot_bt_mode(val)
         
-    # Read Only
     @pyqtProperty(int, notify=batteryLevelChanged)
     def batteryLevel(self): return self._battery_level
     
@@ -471,7 +442,7 @@ class HeadsetController(QObject):
     notifyMicMuteChanged = pyqtSignal(bool)
     notifyMicConnectChanged = pyqtSignal(bool)
     notifyBtConnectChanged = pyqtSignal(bool)
-    notifyBtToggleChanged = pyqtSignal(bool) # Enabled/Disabled
+    notifyBtToggleChanged = pyqtSignal(bool) 
 
     @pyqtProperty(bool, notify=notifyMicMuteChanged)
     def notifyOnMicMute(self): return self._notify_mic_mute
@@ -509,7 +480,6 @@ class HeadsetController(QObject):
         self._settings.setValue("notifications/btToggle", val)
         self.notifyBtToggleChanged.emit(val)
 
-    # Battery & Power Notifications
     notifyBatteryChanged = pyqtSignal(bool)
     notifyChargingChanged = pyqtSignal(bool)
 

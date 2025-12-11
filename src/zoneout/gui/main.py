@@ -9,8 +9,8 @@ from PyQt6.QtGui import QIcon
 
 from zoneout.gui.controller import HeadsetController
 
+
 def main():
-    # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     
     app = QApplication(sys.argv)
@@ -18,18 +18,13 @@ def main():
     app.setOrganizationName("ZoneOut")
     app.setOrganizationDomain("zoneout.local")
     
-    # prevent window from closing the app, just hide it (if we want to minimize to tray)
-    # But for now, let's keep standard behavior or just use tray for notifications/show/hide
     app.setQuitOnLastWindowClosed(False)
 
-    # Setup System Tray
     tray_icon = QSystemTrayIcon(app)
     
-    # Load custom icon
     icon_path = Path(__file__).parent / "resources" / "zoneout.png"
     if icon_path.exists():
         icon = QIcon(str(icon_path))
-        # Set window icon as well for taskbar
         app.setWindowIcon(icon)
     elif QIcon.hasThemeIcon("audio-headset"):
         icon = QIcon.fromTheme("audio-headset")
@@ -41,7 +36,6 @@ def main():
     
     tray_menu = QMenu()
     
-    # Status Actions (Disabled to act as labels)
     vol_action = tray_menu.addAction("Volume: ...")
     vol_action.setEnabled(False)
     bal_action = tray_menu.addAction("Balance: ...")
@@ -62,14 +56,10 @@ def main():
 
     engine = QQmlApplicationEngine()
     
-    # Initialize Controller
     controller = HeadsetController()
     
-    # Expose to QML
     engine.rootContext().setContextProperty("headset", controller)
     
-    # Load Main QML
-    # Assuming qml/main.qml is relative to this file
     qml_file = Path(__file__).parent / "qml" / "main.qml"
     
     if not qml_file.exists():
@@ -82,11 +72,8 @@ def main():
         sys.exit(-1)
 
     window = engine.rootObjects()[0]
-    # Set window icon again explicitly for the QML window if needed, 
-    # though app.setWindowIcon usually covers it.
     window.setIcon(icon)
     
-    # Connect signals
     def show_window():
         window.show()
         window.raise_()
@@ -138,7 +125,6 @@ def main():
         else:
             bt_status = "Enabled"
             
-        # Balance formatting
         bal = controller.balance
         if bal == 0:
             bal_str = "Game 100%"
@@ -157,14 +143,12 @@ def main():
         )
         tray_icon.setToolTip(tooltip)
         
-        # Update Menu Actions
         vol_action.setText(f"Volume: {controller.volume}")
         bal_action.setText(f"Balance: {bal_str}")
         nc_action.setText(f"Noise Control: {nc_mode_str}")
         mic_action.setText(f"Mic: {mic_status}")
         bt_action.setText(f"Bluetooth: {bt_status}")
 
-    # Connect signals to tooltip update
     controller.volumeChanged.connect(update_tray_tooltip)
     controller.balanceChanged.connect(update_tray_tooltip)
     controller.ncModeChanged.connect(update_tray_tooltip)
@@ -174,10 +158,10 @@ def main():
     controller.bluetoothEnabledChanged.connect(update_tray_tooltip)
     controller.usbConnectedChanged.connect(update_tray_tooltip)
     
-    # Initial update
     update_tray_tooltip()
 
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()
