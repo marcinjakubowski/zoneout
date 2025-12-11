@@ -12,8 +12,14 @@ dependencies = [
     "hidapi>=0.14.0",
 ]
 
+[project.optional-dependencies]
+gui = [
+    "PyQt6>=6.0.0",
+]
+
 [project.scripts]
 zoneout = "zoneout.cli:main"
+zoneout-gui = "zoneout.gui.main:main"
 
 [project.urls]
 "Homepage" = "https://github.com/mjakubowski/zoneout"

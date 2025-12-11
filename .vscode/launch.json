@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ZoneOut GUI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "zoneout.gui.main",
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "ZoneOut CLI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "zoneout.cli",
+            "args": [
+                "--get-all"
+            ],
+            "console": "integratedTerminal",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        }
+    ]
+}
