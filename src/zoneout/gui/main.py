@@ -24,14 +24,17 @@ def main():
 
     # Setup System Tray
     tray_icon = QSystemTrayIcon(app)
-    # Use standard icon or fallback
-    if QIcon.hasThemeIcon("audio-headset"):
+    
+    # Load custom icon
+    icon_path = Path(__file__).parent / "resources" / "zoneout.png"
+    if icon_path.exists():
+        icon = QIcon(str(icon_path))
+        # Set window icon as well for taskbar
+        app.setWindowIcon(icon)
+    elif QIcon.hasThemeIcon("audio-headset"):
         icon = QIcon.fromTheme("audio-headset")
     else:
-        # Fallback if no theme icon - potentially create a simple pixmap or expect one
-        # For now, let's assume system theme or empty (which might not show)
-        # PyQt usually needs an icon to show the tray
-        icon = QIcon.fromTheme("audio-card") # another attempt
+        icon = QIcon.fromTheme("audio-card")
         
     tray_icon.setIcon(icon)
     tray_icon.setToolTip("ZoneOut Controller")
@@ -79,6 +82,9 @@ def main():
         sys.exit(-1)
 
     window = engine.rootObjects()[0]
+    # Set window icon again explicitly for the QML window if needed, 
+    # though app.setWindowIcon usually covers it.
+    window.setIcon(icon)
     
     # Connect signals
     def show_window():
@@ -88,24 +94,17 @@ def main():
         
     def on_tray_activated(reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
-            show_window()
+            if window.isVisible():
+                window.hide()
+            else:
+                show_window()
             
     tray_icon.activated.connect(on_tray_activated)
     show_action.triggered.connect(show_window)
     quit_action.triggered.connect(app.quit)
     
-    # Handle window closing -> hide instead of quit if we want tray persistence
-    # QML Window closing usually quits if quitOnLastWindowClosed is true.
-    # We set it to False. But we need to handle the window close event to just hide.
-    # Connecting to QQuickWindow closing signal is tricky from Py. 
-    # Easiest is to let it close and show_window re-opens/creates it OR keeps it hidden.
-    # But QML ApplicationWindow closing usually destroys it.
-    # Let's override closing in QML or just allow quit for now on X click?
-    # User requirement: "continuously monitor for events in the background"
-    # So we should probably minimize to tray.
-    
     def on_notification_requested(title, message):
-        tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 3000)
+        tray_icon.showMessage(title, message, icon, 3000)
         
     controller.notificationRequested.connect(on_notification_requested)
 
@@ -119,7 +118,6 @@ def main():
             bt_action.setVisible(False)
             return
         
-        # Ensure visible
         bal_action.setVisible(True)
         nc_action.setVisible(True)
         mic_action.setVisible(True)
