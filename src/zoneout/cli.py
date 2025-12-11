@@ -22,6 +22,8 @@ VAR_MAP: Dict[str, Tuple[str, str, Optional[str]]] = {
     'mic_connected': ('system', 'mic_connected', None),
     'boot_nc': ('system', 'boot_nc', 'set_boot_nc_mode'),
     'boot_bt': ('system', 'boot_bt', 'set_boot_bt_mode'),
+    'ambient_level': ('nc', 'ambient_level', 'set_ambient_sound_level'),
+    'focus_voice': ('nc', 'focus_voice', 'set_ambient_sound_focus'),
 }
 
 VARIABLE_HELP = """
@@ -34,6 +36,8 @@ VARIABLES & ALLOWED VALUES:
 
 [Noise Control]
   nc_mode       0=Off, 1=Noise Cancelling, 2=Ambient Sound
+  ambient_level 1-20    (Ambient Sound Level)
+  focus_voice   0/1     (Focus on Voice)
 
 [System]
   auto_off      0 (Disabled), 5, 10, 30, 60, 180 (Minutes)

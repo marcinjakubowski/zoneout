@@ -63,6 +63,8 @@ The official driver sends 8 distinct requests during startup.
 #### Request 7 (NC Status)
 * **Byte 13:** Mic Mute Status (`1`=Muted, `0`=Unmuted). *Note: Always `1` if Mic Disconnected.*
 * **Byte 16:** Noise Cancellation Mode (`0`=Off, `1`=NC, `2`=Ambient)
+* **Byte 17:** Ambient Sound Level (0-20)
+* **Byte 19:** Focus on Voice (0/1)
 
 #### Request 8 (System Status)
 * **Byte 13:** NC Default on Boot (`0`=Off, `1`=NC, `2`=Amb, `3`=Remember)
@@ -99,6 +101,7 @@ checksum = (Sequence + Value + Constant) % 256
 | **Language** | `0x0D` | `0x83` | 13 | 14 | `0x1F` | |
 | **NC Default (Boot)** | `0x0D` | `0x43` | 13 | 14 | `0xDF` | |
 | **BT Default (Boot)** | `0x0D` | `0x63` | 13 | 14 | `0xFF` | |
+| **Ambient Sound** | `0x10` | `0x41` | Mixed | 17 | `0xDC` | Special Checksum: `(Seq+Mode(2)+Lvl+Focus+0xDC)&0xFF`. Byte 13=`0x02`, 14=Lvl(0-20), 15=`0xFF`, 16=Focus(0/1) |
 
 ## Asynchronous Event Protocol
 

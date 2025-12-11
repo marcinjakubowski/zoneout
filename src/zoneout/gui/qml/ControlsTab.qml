@@ -107,26 +107,73 @@ ScrollView {
             Layout.fillWidth: true
             Layout.margins: 10
             
-            RowLayout {
+            ColumnLayout {
+                width: parent.width
                 spacing: 10
                 
-                RadioButton {
-                    text: "Off"
-                    checked: headset.ncMode === 0
-                    font.bold: checked
-                    onToggled: if (checked) headset.setNcMode(0)
+                RowLayout {
+                    spacing: 10
+                    
+                    RadioButton {
+                        text: "Off"
+                        checked: headset.ncMode === 0
+                        font.bold: checked
+                        onToggled: if (checked) headset.setNcMode(0)
+                    }
+                    RadioButton {
+                        text: "Noise Cancelling"
+                        checked: headset.ncMode === 1
+                        font.bold: checked
+                        onToggled: if (checked) headset.setNcMode(1)
+                    }
+                    RadioButton {
+                        text: "Ambient Sound"
+                        checked: headset.ncMode === 2
+                        font.bold: checked
+                        onToggled: if (checked) headset.setNcMode(2)
+                    }
                 }
-                RadioButton {
-                    text: "Noise Cancelling"
-                    checked: headset.ncMode === 1
-                    font.bold: checked
-                    onToggled: if (checked) headset.setNcMode(1)
-                }
-                RadioButton {
-                    text: "Ambient Sound"
-                    checked: headset.ncMode === 2
-                    font.bold: checked
-                    onToggled: if (checked) headset.setNcMode(2)
+                
+                GridLayout {
+                    enabled: headset.ncMode === 2
+                    opacity: enabled ? 1.0 : 0.5
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 20
+                    rowSpacing: 10
+                    Layout.leftMargin: 10
+                    
+                    Label { text: "Ambient Level" }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Slider {
+                            id: ambSlider
+                            Layout.fillWidth: true
+                            from: 1
+                            to: 20
+                            stepSize: 1
+                            value: headset.ambientLevel
+                            
+                            onMoved: {
+                                pendingCommand = () => headset.setAmbientLevel(ambSlider.value)
+                                sharedTimer.restart()
+                            }
+                            onPressedChanged: {
+                                if (!pressed) {
+                                    sharedTimer.stop()
+                                    headset.setAmbientLevel(ambSlider.value)
+                                    pendingCommand = null
+                                }
+                            }
+                        }
+                        Label { text: ambSlider.value }
+                    }
+                    
+                    Label { text: "Focus on Voice" }
+                    Switch {
+                        checked: headset.focusOnVoice
+                        onToggled: headset.setFocusOnVoice(checked)
+                    }
                 }
             }
         }

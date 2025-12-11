@@ -1,4 +1,4 @@
-from typing import Generator, Optional, List, Any
+from typing import Generator, Optional, List, Any, Union, Tuple
 
 import hid
 
@@ -41,7 +41,7 @@ class ZoneHeadset:
 
     # --- Low Level Protocol ---
 
-    def _send_cmd(self, setting_key: str, value: int) -> None:
+    def _send_cmd(self, setting_key: str, value: Union[int, Tuple[int, ...]]) -> None:
         if setting_key not in protocol.WRITE_MAP:
             raise ProtocolError(f"Unknown setting key: {setting_key}")
 
@@ -53,12 +53,27 @@ class ZoneHeadset:
             protocol.MAGIC_1, protocol.MAGIC_2, 0x41, cmd_byte, 0x02, self.seq
         ])
         data[0:len(header)] = header
-        data[val_idx] = value
+        if isinstance(val_idx, tuple):
+            if not isinstance(value, (tuple, list)) or len(value) != len(val_idx):
+                raise ProtocolError(f"Value mismatch for multi-write key {setting_key}")
+            
+            chk_sum_base = 0
+            for i, idx in enumerate(val_idx):
+                v = value[i]
+                data[idx] = v
+                chk_sum_base += v
+            
+            for idx, byte_val in spacers.items():
+                data[idx] = byte_val
 
-        for idx, byte_val in spacers.items():
-            data[idx] = byte_val
+            data[chk_idx] = (self.seq + chk_sum_base + chk_const) & 0xFF
+        else:
+            data[val_idx] = value
 
-        data[chk_idx] = (self.seq + value + chk_const) & 0xFF
+            for idx, byte_val in spacers.items():
+                data[idx] = byte_val
+
+            data[chk_idx] = (self.seq + value + chk_const) & 0xFF
 
         if self.device:
             self.device.write(data)
@@ -140,6 +155,19 @@ class ZoneHeadset:
     def set_boot_bt_mode(self, mode: int) -> None:
         self._send_cmd('boot_bt', max(0, min(2, int(mode))))
 
+    def set_ambient_sound(self, level: int, focus: bool) -> None:
+        level = max(0, min(20, int(level)))
+        focus_val = 1 if focus else 0
+        self._send_cmd('ambient_sound', (level, focus_val))
+
+    def set_ambient_sound_level(self, level: int) -> None:
+        """Helper for CLI: sets level with Focus=False"""
+        self.set_ambient_sound(level, False)
+
+    def set_ambient_sound_focus(self, focus: int) -> None:
+        """Helper for CLI: sets focus with Level=20 (Max)"""
+        self.set_ambient_sound(20, bool(focus))
+
     # --- Public API: Getters (Typed) ---
 
     def get_audio_status(self) -> AudioStatus:
@@ -158,7 +186,9 @@ class ZoneHeadset:
         data = self._get_report(protocol.REQ_NC_STATUS)
         return NcStatus(
             nc_mode=NcMode(data[16]),
-            mic_muted=bool(data[13])
+            mic_muted=bool(data[13]),
+            ambient_level=data[17],
+            focus_on_voice=bool(data[19])
         )
 
     def get_system_status(self) -> SystemStatus:

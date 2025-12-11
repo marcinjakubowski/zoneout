@@ -56,6 +56,8 @@ class HeadsetController(QObject):
     languageChanged = pyqtSignal(int)
     bootNcModeChanged = pyqtSignal(int)
     bootBtModeChanged = pyqtSignal(int)
+    ambientLevelChanged = pyqtSignal(int)
+    focusOnVoiceChanged = pyqtSignal(bool)
     
     # Read-only status signals
     batteryLevelChanged = pyqtSignal(int)
@@ -92,6 +94,8 @@ class HeadsetController(QObject):
         self._language = 0
         self._boot_nc = 0
         self._boot_bt = 0
+        self._ambient_level = 20
+        self._focus_on_voice = False
         
         self._battery_level = -1
         self._is_charging = False
@@ -158,6 +162,8 @@ class HeadsetController(QObject):
         # NC
         self._update_nc_mode(status.nc.nc_mode)
         self._update_mic_mute(status.nc.mic_muted)
+        self._update_ambient_level(status.nc.ambient_level)
+        self._update_focus_on_voice(status.nc.focus_on_voice)
         
         # System
         self._update_auto_off(status.system.auto_off_minutes)
@@ -199,32 +205,41 @@ class HeadsetController(QObject):
         elif event.type == EventType.BALANCE:
             self._update_balance(event.value)
         elif event.type == EventType.NC_MODE:
-            self._update_nc_mode(event.value)
-            if self._notify_nc:
-                modes = {0: "Off", 1: "Noise Cancelling", 2: "Ambient Sound"}
-                mode_str = modes.get(event.value, "Unknown")
-                self.notificationRequested.emit("Noise Control", mode_str)
+            # Only notify if the mode actually changed
+            if self._nc_mode != event.value:
+                self._update_nc_mode(event.value)
+                if self._notify_nc:
+                    modes = {0: "Off", 1: "Noise Cancelling", 2: "Ambient Sound"}
+                    mode_str = modes.get(event.value, "Unknown")
+                    self.notificationRequested.emit("Noise Control", mode_str)
+            else:
+                 # Update internal state silently if needed (though mode didn't change integer)
+                 self._update_nc_mode(event.value)
         elif event.type == EventType.MIC_MUTE:
-            self._update_mic_mute(event.value)
-            if self._notify_mic_mute:
-                self.notificationRequested.emit("Microphone", "Muted" if event.value else "Unmuted")
+            if self._mic_muted != event.value:
+                self._update_mic_mute(event.value)
+                if self._notify_mic_mute:
+                    self.notificationRequested.emit("Microphone", "Muted" if event.value else "Unmuted")
         elif event.type == EventType.MIC_CONN:
-            connected = event.value
-            self._update_mic_conn(connected)
-            if self._notify_mic_connect:
-                self.notificationRequested.emit("Microphone", "Connected" if connected else "Disconnected")
+            if self._mic_connected != event.value:
+                self._update_mic_conn(event.value)
+                if self._notify_mic_connect:
+                    self.notificationRequested.emit("Microphone", "Connected" if event.value else "Disconnected")
         elif event.type == EventType.POWER:
             self._update_battery(event.value.battery_level, event.value.charging)
         elif event.type == EventType.BLUETOOTH:
+            # Check for changes
+            conn_changed = (self._bt_connected != event.value.connected)
+            enabled_changed = (self._bt_enabled != event.value.enabled)
+            
             self._update_bt_state(event.value)
-            status = "Connected" if event.value.connected else "Disconnected"
-            enabled = "Enabled" if event.value.enabled else "Disabled"
-            # Decide what to notify. Usually connection status is more interesting if enabled.
+            
             if event.value.enabled:
-                if self._notify_bt_connect:
+                if self._notify_bt_connect and conn_changed:
+                   status = "Connected" if event.value.connected else "Disconnected"
                    self.notificationRequested.emit("Bluetooth", status)
             else:
-                if self._notify_bt_toggle:
+                if self._notify_bt_toggle and enabled_changed:
                    self.notificationRequested.emit("Bluetooth", "Disabled")
 
     # --- Property Updaters (Internal) ---
@@ -274,6 +289,16 @@ class HeadsetController(QObject):
         if self._mic_muted != val:
             self._mic_muted = val
             self.micMutedChanged.emit(val)
+
+    def _update_ambient_level(self, val):
+        if self._ambient_level != val:
+            self._ambient_level = val
+            self.ambientLevelChanged.emit(val)
+
+    def _update_focus_on_voice(self, val):
+        if self._focus_on_voice != val:
+            self._focus_on_voice = val
+            self.focusOnVoiceChanged.emit(val)
 
     def _update_auto_off(self, val):
         if self._auto_off != val:
@@ -346,7 +371,37 @@ class HeadsetController(QObject):
 
     @pyqtSlot(int)
     def setNcMode(self, val):
-        if self._headset: self._headset.set_noise_cancelling(val)
+        if self._headset: 
+            if val == 2:
+                self._headset.set_ambient_sound(self._ambient_level, self._focus_on_voice)
+            else:
+                self._headset.set_noise_cancelling(val)
+        # Optimistic update
+        self._update_nc_mode(val)
+
+    @pyqtProperty(int, notify=ambientLevelChanged)
+    def ambientLevel(self): return self._ambient_level
+
+    @pyqtSlot(int)
+    def setAmbientLevel(self, val):
+        self._ambient_level = val
+        self.ambientLevelChanged.emit(val)
+        if self._headset:
+            self._headset.set_ambient_sound(self._ambient_level, self._focus_on_voice)
+            # Implicitly switches to Ambient, so update mode optimistic
+            self._update_nc_mode(2)
+
+    @pyqtProperty(bool, notify=focusOnVoiceChanged)
+    def focusOnVoice(self): return self._focus_on_voice
+
+    @pyqtSlot(bool)
+    def setFocusOnVoice(self, val):
+        self._focus_on_voice = val
+        self.focusOnVoiceChanged.emit(val)
+        if self._headset:
+            self._headset.set_ambient_sound(self._ambient_level, self._focus_on_voice)
+            # Implicitly switches to Ambient
+            self._update_nc_mode(2)
 
     @pyqtProperty(int, notify=autoPowerOffChanged)
     def autoPowerOff(self): return self._auto_off

@@ -67,6 +67,8 @@ class AudioStatus:
 class NcStatus:
     nc_mode: NcMode
     mic_muted: bool
+    ambient_level: int
+    focus_on_voice: bool
 
 
 @dataclass
