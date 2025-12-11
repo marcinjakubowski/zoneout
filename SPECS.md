@@ -120,7 +120,7 @@ The headset sends unsolicited packets when physical controls are used OR periodi
 | CMD | Description | Payload | Notes |
 | :--- | :--- | :--- | :--- |
 | `0x04` | **Power State** | Byte 13: Charging (`0`/`1`), Byte 14: Level (`0`-`100`) | Sends every ~60s while charging. |
-| `0x21` | **Volume Changed** | Byte 15: New Volume (0-30) | |
+| `0x21` | **Volume Changed** | Byte 14: New Volume (0-30) | |
 | `0x22` | **Balance Changed** | Byte 13: New Balance (0-100) | |
 | `0x41` | **NC Mode Changed** | Byte 13: New Mode (0/1/2) | |
 | `0x24` | **Mic Mute State** | Byte 13: `1`=Muted, `0`=Unmuted | |

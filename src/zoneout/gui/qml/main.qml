@@ -6,9 +6,9 @@ ApplicationWindow {
     id: window
     visible: true
     width: 530
-    height: 550
+    height: 600
     minimumWidth: 530
-    minimumHeight: 550
+    minimumHeight: 600
     title: "ZoneOut"
     
     onClosing: (close) => {

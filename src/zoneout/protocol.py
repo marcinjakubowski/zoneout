@@ -23,7 +23,6 @@ WRITE_MAP: Dict[str, Tuple[int, int, Union[int, Tuple[int, ...]], int, int, Dict
     'notif_voice':   (0x0D, 0x84, 13, 14, 0x20, {}),
     'voice_lang':    (0x0D, 0x83, 13, 14, 0x1F, {}),
     'boot_nc':       (0x0D, 0x43, 13, 14, 0xDF, {}),
-    'boot_nc':       (0x0D, 0x43, 13, 14, 0xDF, {}),
     'boot_bt':       (0x0D, 0x63, 13, 14, 0xFF, {}),
     # Multi-value writes: (Type, Cmd, (Val1_Off, Val2_Off), Chk_Off, Chk_Const, Spacers)
     'ambient_sound': (0x10, 0x41, (14, 16), 17, 0xDE, {13: 0x02, 15: 0xFF}),

@@ -23,7 +23,7 @@ class ZoneHeadset:
             self.device.set_nonblocking(0)
         except Exception as e:
             raise DeviceNotFoundError(
-                f"Could not open H9 Headset ({hex(protocol.VENDOR_ID)}:{hex(protocol.PRODUCT_ID)}). "
+                f"Could not open H9 II Headset ({hex(protocol.VENDOR_ID)}:{hex(protocol.PRODUCT_ID)}). "
                 f"Check USB connection and permissions (udev rules)."
             ) from e
 
