@@ -117,8 +117,8 @@ class HeadsetController(QObject):
         self._notify_charging = self._settings.value("notifications/charging", True, type=bool)
         self._notify_nc = self._settings.value("notifications/nc", True, type=bool)
         
-        # Try to connect immediately
-        self.connect_device()
+        # Try to connect immediately (deferred to allow signal connection)
+        QTimer.singleShot(0, self.connect_device)
 
     def connect_device(self):
         try:
@@ -183,6 +183,7 @@ class HeadsetController(QObject):
         self.usbConnectedChanged.emit(False)
         self.connectionStatusChanged.emit(False, msg)
         self._headset = None
+        self._low_battery_notified = False
         
         # Start retry timer
         if not self._retry_timer.isActive():
