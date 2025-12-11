@@ -37,6 +37,21 @@ def main():
     tray_icon.setToolTip("ZoneOut Controller")
     
     tray_menu = QMenu()
+    
+    # Status Actions (Disabled to act as labels)
+    vol_action = tray_menu.addAction("Volume: ...")
+    vol_action.setEnabled(False)
+    bal_action = tray_menu.addAction("Balance: ...")
+    bal_action.setEnabled(False)
+    nc_action = tray_menu.addAction("NC Mode: ...")
+    nc_action.setEnabled(False)
+    mic_action = tray_menu.addAction("Mic: ...")
+    mic_action.setEnabled(False)
+    bt_action = tray_menu.addAction("Bluetooth: ...")
+    bt_action.setEnabled(False)
+    
+    tray_menu.addSeparator()
+    
     show_action = tray_menu.addAction("Show")
     quit_action = tray_menu.addAction("Quit")
     tray_icon.setContextMenu(tray_menu)
@@ -93,6 +108,76 @@ def main():
         tray_icon.showMessage(title, message, QSystemTrayIcon.MessageIcon.Information, 3000)
         
     controller.notificationRequested.connect(on_notification_requested)
+
+    def update_tray_tooltip(*args):
+        if not controller.usbConnected:
+            tray_icon.setToolTip("ZoneOut\n\nDisconnected")
+            vol_action.setText("Disconnected")
+            bal_action.setVisible(False)
+            nc_action.setVisible(False)
+            mic_action.setVisible(False)
+            bt_action.setVisible(False)
+            return
+        
+        # Ensure visible
+        bal_action.setVisible(True)
+        nc_action.setVisible(True)
+        mic_action.setVisible(True)
+        bt_action.setVisible(True)
+
+        nc_modes = {0: "Off", 1: "Noise Cancelling", 2: "Ambient Sound"}
+        nc_mode_str = nc_modes.get(controller.ncMode, "Unknown")
+
+        if not controller.micConnected:
+            mic_status = "Disconnected"
+        else:
+            mic_status = "Muted" if controller.micMuted else "Active"
+
+        if not controller.bluetoothEnabled:
+            bt_status = "Disabled"
+        elif controller.bluetoothConnected:
+            bt_status = "Connected"
+        else:
+            bt_status = "Enabled"
+            
+        # Balance formatting
+        bal = controller.balance
+        if bal == 0:
+            bal_str = "Game 100%"
+        elif bal == 100:
+            bal_str = "100% Chat"
+        else:
+            bal_str = f"Game {100 - bal}%/{bal}% Chat"
+
+        tooltip = (
+            f"ZoneOut\n\n"
+            f"Volume: {controller.volume}\n"
+            f"Balance: {bal_str}\n"
+            f"Noise control mode: {nc_mode_str}\n"
+            f"Microphone status: {mic_status}\n"
+            f"Bluetooth status: {bt_status}"
+        )
+        tray_icon.setToolTip(tooltip)
+        
+        # Update Menu Actions
+        vol_action.setText(f"Volume: {controller.volume}")
+        bal_action.setText(f"Balance: {bal_str}")
+        nc_action.setText(f"Noise Control: {nc_mode_str}")
+        mic_action.setText(f"Mic: {mic_status}")
+        bt_action.setText(f"Bluetooth: {bt_status}")
+
+    # Connect signals to tooltip update
+    controller.volumeChanged.connect(update_tray_tooltip)
+    controller.balanceChanged.connect(update_tray_tooltip)
+    controller.ncModeChanged.connect(update_tray_tooltip)
+    controller.micMutedChanged.connect(update_tray_tooltip)
+    controller.micConnectedChanged.connect(update_tray_tooltip)
+    controller.bluetoothConnectedChanged.connect(update_tray_tooltip)
+    controller.bluetoothEnabledChanged.connect(update_tray_tooltip)
+    controller.usbConnectedChanged.connect(update_tray_tooltip)
+    
+    # Initial update
+    update_tray_tooltip()
 
     sys.exit(app.exec())
 
