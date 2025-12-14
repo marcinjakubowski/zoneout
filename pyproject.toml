@@ -24,3 +24,7 @@ zoneout-gui = "zoneout.gui.main:main"
 [project.urls]
 "Homepage" = "https://github.com/mjakubowski/zoneout"
 "Bug Tracker" = "https://github.com/mjakubowski/zoneout/issues"
+
+[tool.setuptools.package-data]
+"zoneout.gui.qml" = ["*"]
+"zoneout.gui" = ["resources/*"]
