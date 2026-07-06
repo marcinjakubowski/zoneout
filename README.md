@@ -1,6 +1,10 @@
 # ZoneOut
 
-**ZoneOut** is an open-source Linux CLI controller and Python library for **Sony INZONE™ H9 II** (and compatible) gaming headsets. 
+**ZoneOut** is an open-source Linux CLI controller and Python library for **Sony INZONE™** headsets. Supported devices:
+
+* **INZONE H9 II** (`054c:0fa8`)
+* **INZONE Buds** (`054c:0ec2`)
+
 
 It enables access to hardware features on Linux that are usually locked behind the Windows-only "INZONE Hub" software, such as Sidetone control, Chat/Game hardware mixing, and Auto-Power Off settings.
 
@@ -32,9 +36,12 @@ pip install .
 ### USB Permissions (udev)
 By default, Linux requires root to access raw USB HID devices. To run `zoneout` as a standard user, create a udev rule.
 
-1. Create `/etc/udev/rules.d/99-zoneout.rules`:
+1. Create `/etc/udev/rules.d/99-zoneout.rules` (two lines per supported device):
    ```bash
    SUBSYSTEM=="usb", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0fa8", MODE="0666"
+   KERNEL=="hidraw*", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0fa8", MODE="0666"
+   SUBSYSTEM=="usb", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0ec2", MODE="0666"
+   KERNEL=="hidraw*", ATTRS{idVendor}=="054c", ATTRS{idProduct}=="0ec2", MODE="0666"
    ```
 2. Reload rules and re-plug your headset transceiver:
    ```bash
@@ -44,6 +51,19 @@ By default, Linux requires root to access raw USB HID devices. To run `zoneout` 
 ## Usage
 
 The package installs the `zoneout` command.
+
+### Selecting a Device
+
+With a single supported device connected, `zoneout` uses it automatically. With multiple connected, it defaults to the first detected; use `--device` to target a specific model:
+
+```bash
+zoneout --list-devices
+# INZONE Buds  (054c:0ec2)
+# INZONE H9 II  (054c:0fa8)
+
+zoneout --device buds --get battery
+zoneout --device h9 --set volume 20
+```
 
 ### Reading Status
 

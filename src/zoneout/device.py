@@ -7,25 +7,75 @@ from .exceptions import DeviceNotFoundError, ProtocolError
 from .models import (
     AudioStatus, NcStatus, SystemStatus, HeadsetFullStatus,
     HeadsetEvent, BluetoothState, NcMode, BootNcMode, BootBtMode,
-    Language, EventType, PowerState
+    Language, EventType, PowerState, DeviceInfo
 )
 
 
+def find_devices() -> List[DeviceInfo]:
+    """Enumerate connected supported devices (one entry per model)."""
+    found: List[DeviceInfo] = []
+    seen = set()
+    for info in hid.enumerate():
+        key = (info['vendor_id'], info['product_id'])
+        if key in protocol.SUPPORTED_DEVICES and key not in seen:
+            seen.add(key)
+            found.append(DeviceInfo(key[0], key[1], protocol.SUPPORTED_DEVICES[key]))
+    found.sort(key=lambda d: d.name)
+    return found
+
+
+def resolve_device(query: str) -> DeviceInfo:
+    """Match a user-supplied model name (e.g. 'h9', 'buds') against supported devices."""
+    q = query.strip().lower().replace('-', ' ')
+    matches = [
+        DeviceInfo(vid, pid, name)
+        for (vid, pid), name in protocol.SUPPORTED_DEVICES.items()
+        if q in name.lower()
+    ]
+    if len(matches) == 1:
+        return matches[0]
+
+    names = ", ".join(f"'{n}'" for n in protocol.SUPPORTED_DEVICES.values())
+    if not matches:
+        raise DeviceNotFoundError(f"Unknown device '{query}'. Supported models: {names}.")
+    raise DeviceNotFoundError(f"Ambiguous device '{query}'. Supported models: {names}.")
+
+
 class ZoneHeadset:
-    def __init__(self) -> None:
+    def __init__(self, vendor_id: Optional[int] = None, product_id: Optional[int] = None) -> None:
         self.device: Optional[Any] = None
-        self.seq: int = 1  
+        self.seq: int = 1
+        self.vendor_id: Optional[int] = vendor_id
+        self.product_id: Optional[int] = product_id
+        self.name: Optional[str] = None
 
     def connect(self) -> None:
-        try:
-            self.device = hid.device()
-            self.device.open(protocol.VENDOR_ID, protocol.PRODUCT_ID)
-            self.device.set_nonblocking(0)
-        except Exception as e:
-            raise DeviceNotFoundError(
-                f"Could not open H9 II Headset ({hex(protocol.VENDOR_ID)}:{hex(protocol.PRODUCT_ID)}). "
-                f"Check USB connection and permissions (udev rules)."
-            ) from e
+        if self.product_id is not None:
+            targets = [(self.vendor_id or protocol.VENDOR_ID, self.product_id)]
+        else:
+            targets = [(d.vendor_id, d.product_id) for d in find_devices()]
+            if not targets:
+                targets = list(protocol.SUPPORTED_DEVICES.keys())
+
+        last_err: Optional[Exception] = None
+        for vid, pid in targets:
+            try:
+                dev = hid.device()
+                dev.open(vid, pid)
+                dev.set_nonblocking(0)
+            except Exception as e:
+                last_err = e
+                continue
+            self.device = dev
+            self.vendor_id, self.product_id = vid, pid
+            self.name = protocol.SUPPORTED_DEVICES.get((vid, pid), "Unknown INZONE Device")
+            return
+
+        names = ", ".join(protocol.SUPPORTED_DEVICES.values())
+        raise DeviceNotFoundError(
+            f"Could not open a supported INZONE device ({names}). "
+            f"Check USB connection and permissions (udev rules)."
+        ) from last_err
 
     def close(self) -> None:
         if self.device:
@@ -84,7 +134,9 @@ class ZoneHeadset:
         except:
             pass
 
-    def _get_report(self, cmd_id: int, retries: int = 10) -> List[int]:
+    # INZONE Buds take 225-300ms to answer status requests (H9 II: <60ms),
+    # so the total read budget must comfortably exceed that.
+    def _get_report(self, cmd_id: int, retries: int = 40) -> List[int]:
         req = bytearray(64)
 
         read_checksum = (cmd_id + 0x9C) & 0xFF
@@ -106,7 +158,7 @@ class ZoneHeadset:
         self.device.write(req)
 
         for _ in range(retries):
-            data = self.device.read(64, timeout_ms=15)
+            data = self.device.read(64, timeout_ms=25)
             if not data: continue
 
             if len(data) >= 64 and data[9] == cmd_id:
@@ -156,13 +208,37 @@ class ZoneHeadset:
 
     def get_audio_status(self) -> AudioStatus:
         data = self._get_report(protocol.REQ_AUDIO_STATUS)
-        
+
+        layout = protocol.AUDIO_STATUS_LAYOUTS.get(
+            (self.vendor_id, self.product_id), protocol.DEFAULT_AUDIO_LAYOUT
+        )
+        def _level(key: str) -> Optional[int]:
+            # A docked/disconnected component reads 0xFF -> level unknown.
+            if key not in layout:
+                return None
+            v = data[layout[key]]
+            return v if v <= 100 else None
+
+        left = _level('battery_left')
+        right = _level('battery_right')
+        case = _level('battery_case')
+
+        if 'battery_left' in layout:
+            # Report the worse of the connected buds; -1 if none connected.
+            connected = [v for v in (left, right) if v is not None]
+            battery = min(connected) if connected else -1
+        else:
+            battery = data[layout['battery']]
+
         return AudioStatus(
-            volume=data[17],
-            balance=data[19],
-            sidetone=data[20],
-            battery_level=data[15],
-            charging=bool(data[14])
+            volume=data[layout['volume']],
+            balance=data[layout['balance']],
+            sidetone=data[layout['sidetone']],
+            battery_level=battery,
+            charging=bool(data[layout['charging']]),
+            battery_left=left,
+            battery_right=right,
+            battery_case=case
         )
 
     def get_nc_status(self) -> NcStatus:
@@ -193,14 +269,17 @@ class ZoneHeadset:
             system=self.get_system_status()
         )
 
-    def listen(self) -> Generator[HeadsetEvent, None, None]:
-        """Yields typed HeadsetEvent objects."""
+    def listen(self) -> Generator[Optional[HeadsetEvent], None, None]:
+        """Yields typed HeadsetEvent objects, and None roughly once per second
+        while idle so callers can interleave other work or stop cleanly."""
         if not self.device:
             raise DeviceNotFoundError("Device not connected")
 
         while True:
             data = self.device.read(64, timeout_ms=1000)
-            if not data: continue
+            if not data:
+                yield None
+                continue
 
             if len(data) >= 16 and data[2] == 0x04 and data[8] == protocol.EVT_CATEGORY:
                 cmd = data[9]

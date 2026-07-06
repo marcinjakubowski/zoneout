@@ -2,8 +2,13 @@ from typing import Dict, Tuple, Union
 
 
 VENDOR_ID: int = 0x054c
-PRODUCT_ID: int = 0x0fa8
 REPORT_ID: int = 0x02
+
+# (vendor_id, product_id) -> model name. All models assumed protocol-compatible.
+SUPPORTED_DEVICES: Dict[Tuple[int, int], str] = {
+    (0x054c, 0x0fa8): "INZONE H9 II",
+    (0x054c, 0x0ec2): "INZONE Buds",
+}
 
 MAGIC_1: int = 0x96
 MAGIC_2: int = 0xC3
@@ -20,6 +25,19 @@ WRITE_MAP: Dict[str, Tuple[int, int, Union[int, Tuple[int, ...]], int, int, Dict
     'boot_bt':       (0x0D, 0x63, 13, 14, 0xFF, {}),
     
     'ambient_sound': (0x10, 0x41, (14, 16), 17, 0xDE, {13: 0x02, 15: 0xFF}),
+}
+
+# Audio Status (0x06) response byte offsets. Writes use identical commands and
+# scales on all models; only the response layout differs. The Buds shift the
+# control fields and report three battery values (bud L/R at 15/17, case at 19).
+DEFAULT_AUDIO_LAYOUT: Dict[str, int] = {
+    'charging': 14, 'battery': 15, 'volume': 17, 'balance': 19, 'sidetone': 20,
+}
+AUDIO_STATUS_LAYOUTS: Dict[Tuple[int, int], Dict[str, int]] = {
+    (0x054c, 0x0ec2): {
+        'charging': 14, 'battery': 15, 'volume': 21, 'balance': 23, 'sidetone': 24,
+        'battery_left': 15, 'battery_right': 17, 'battery_case': 19,
+    },
 }
 
 REQ_AUDIO_STATUS: int = 0x06

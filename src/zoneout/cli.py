@@ -1,7 +1,7 @@
 import argparse
 import sys
 from typing import Dict, Tuple, Optional, Any
-from .device import ZoneHeadset
+from .device import ZoneHeadset, find_devices, resolve_device
 from .exceptions import DeviceNotFoundError
 from .models import NcMode, BootNcMode, BootBtMode, Language
 
@@ -22,7 +22,7 @@ VAR_MAP: Dict[str, Tuple[str, str, Optional[str]]] = {
     'boot_nc': ('system', 'boot_nc', 'set_boot_nc_mode'),
     'boot_bt': ('system', 'boot_bt', 'set_boot_bt_mode'),
     'ambient_level': ('nc', 'ambient_level', 'set_ambient_sound_level'),
-    'focus_voice': ('nc', 'focus_voice', 'set_ambient_sound_focus'),
+    'focus_voice': ('nc', 'focus_on_voice', 'set_ambient_sound_focus'),
 }
 
 VARIABLE_HELP = """
@@ -62,7 +62,7 @@ def format_value(value: Any) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="ZoneOut: Controller for H9-series Headsets",
+        description="ZoneOut: Controller for Sony INZONE Headsets",
         epilog=VARIABLE_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
@@ -72,16 +72,37 @@ def main() -> None:
     group.add_argument('--get', metavar='VAR', choices=VAR_MAP.keys(), help="Get a specific setting value.")
     group.add_argument('--set', nargs=2, action='append', metavar=('VAR', 'VAL'), help="Set a variable (see list below).")
     group.add_argument('--monitor', action='store_true', help="Listen for events in real-time.")
+    group.add_argument('--list-devices', action='store_true', help="List connected supported devices.")
+    parser.add_argument('--device', metavar='MODEL', help="Target a specific model (e.g. 'h9', 'buds'). Default: first detected.")
 
     args = parser.parse_args()
 
+    if args.list_devices:
+        devices = find_devices()
+        if not devices:
+            print("No supported devices connected.")
+            sys.exit(1)
+        for dev in devices:
+            print(f"{dev.name}  ({dev.vendor_id:04x}:{dev.product_id:04x})")
+        return
+
+    vid = pid = None
+    if args.device:
+        try:
+            target = resolve_device(args.device)
+        except DeviceNotFoundError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
+        vid, pid = target.vendor_id, target.product_id
+
     try:
-        with ZoneHeadset() as headset:
+        with ZoneHeadset(vendor_id=vid, product_id=pid) as headset:
             if args.get_all:
                 status = headset.get_all_data()
 
                 charge_str = " (Charging)" if status.audio.charging else ""
 
+                print(f"Device: {headset.name}\n")
                 print("--- Audio ---")
                 print(f"Volume:             {status.audio.volume}")
                 print(f"Game/Chat Balance:  {status.audio.balance}")
@@ -102,10 +123,13 @@ def main() -> None:
                 print(f"Boot Default (BT):  {format_value(status.system.boot_bt)}")
 
             elif args.get:
-                status = headset.get_all_data()
                 cat_attr, field_name, _ = VAR_MAP[args.get]
-                category = getattr(status, cat_attr)
-                val = getattr(category, field_name)
+                fetch = {
+                    'audio': headset.get_audio_status,
+                    'nc': headset.get_nc_status,
+                    'system': headset.get_system_status,
+                }[cat_attr]
+                val = getattr(fetch(), field_name)
                 print(val.value if hasattr(val, 'value') else int(val))
 
             elif args.set:
@@ -135,6 +159,8 @@ def main() -> None:
                 print("Listening for headset events (Ctrl+C to stop)...")
                 try:
                     for event in headset.listen():
+                        if event is None:
+                            continue
                         val_str = format_value(event.value)
                         print(f"Event: {event.type.value} -> {val_str}")
                 except KeyboardInterrupt:

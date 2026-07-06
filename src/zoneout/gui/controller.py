@@ -3,7 +3,7 @@ from typing import Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, QThread, pyqtSlot, QTimer, QSettings
 
-from zoneout.device import ZoneHeadset
+from zoneout.device import ZoneHeadset, find_devices
 from zoneout.models import (
     NcMode, BootNcMode, BootBtMode, Language, HeadsetEvent, EventType,
     PowerState, BluetoothState
@@ -12,8 +12,11 @@ from zoneout.exceptions import DeviceNotFoundError
 
 
 class MonitorThread(QThread):
-    event_received = pyqtSignal(object)  
+    event_received = pyqtSignal(object)
     connection_lost = pyqtSignal(str)
+    battery_polled = pyqtSignal(object)  # AudioStatus
+
+    BATTERY_POLL_SECONDS = 30
 
     def __init__(self, headset: ZoneHeadset):
         super().__init__()
@@ -21,25 +24,41 @@ class MonitorThread(QThread):
         self._running = True
 
     def run(self):
+        last_poll = time.monotonic()
         while self._running:
             try:
                 for event in self.headset.listen():
                     if not self._running:
                         break
+                    if event is None:
+                        # Idle tick: refresh battery here (this thread owns
+                        # device reads; the GUI thread must not interleave).
+                        if time.monotonic() - last_poll >= self.BATTERY_POLL_SECONDS:
+                            self.battery_polled.emit(self.headset.get_audio_status())
+                            last_poll = time.monotonic()
+                        continue
                     self.event_received.emit(event)
             except DeviceNotFoundError:
-                self.connection_lost.emit("Device disconnected")
+                if self._running:
+                    self.connection_lost.emit("Device disconnected")
                 break
             except Exception as e:
-                self.connection_lost.emit(str(e))
+                if self._running:
+                    self.connection_lost.emit(str(e))
                 break
-            
+
             time.sleep(1)
 
     def stop(self):
         self._running = False
-        self.quit()
-        self.wait()
+        # listen() yields an idle tick at least once a second, so the loop
+        # notices _running on its own; closing the device is the fallback.
+        if not self.wait(2500):
+            try:
+                self.headset.close()
+            except Exception:
+                pass
+            self.wait(2000)
 
 class HeadsetController(QObject):
     volumeChanged = pyqtSignal(int)
@@ -55,6 +74,9 @@ class HeadsetController(QObject):
     focusOnVoiceChanged = pyqtSignal(bool)
     
     batteryLevelChanged = pyqtSignal(int)
+    batteryLeftChanged = pyqtSignal(int)
+    batteryRightChanged = pyqtSignal(int)
+    batteryCaseChanged = pyqtSignal(int)
     isChargingChanged = pyqtSignal(bool)
     micMutedChanged = pyqtSignal(bool)
     micConnectedChanged = pyqtSignal(bool)
@@ -65,6 +87,10 @@ class HeadsetController(QObject):
     
     connectionStatusChanged = pyqtSignal(bool, str)
     usbConnectedChanged = pyqtSignal(bool)
+
+    deviceNameChanged = pyqtSignal(str)
+    availableDevicesChanged = pyqtSignal()
+    currentDeviceIndexChanged = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -88,6 +114,9 @@ class HeadsetController(QObject):
         self._focus_on_voice = False
         
         self._battery_level = -1
+        self._battery_left = -1
+        self._battery_right = -1
+        self._battery_case = -1
         self._is_charging = False
         self._mic_muted = False
         self._mic_connected = True
@@ -108,29 +137,63 @@ class HeadsetController(QObject):
         self._notify_battery = self._settings.value("notifications/battery", True, type=bool)
         self._notify_charging = self._settings.value("notifications/charging", True, type=bool)
         self._notify_nc = self._settings.value("notifications/nc", True, type=bool)
-        
+
+        self._device_name = ""
+        self._available_devices = []
+        self._preferred_pid = self._settings.value("device/preferredPid", 0, type=int) or None
+
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setInterval(3000)
+        self._scan_timer.timeout.connect(self._rescan_devices)
+        self._scan_timer.start()
+
         QTimer.singleShot(0, self.connect_device)
+
+    def _rescan_devices(self):
+        self._set_available_devices(find_devices())
+
+    def _set_available_devices(self, devices):
+        if [d.product_id for d in devices] != [d.product_id for d in self._available_devices]:
+            self._available_devices = devices
+            self.availableDevicesChanged.emit()
+            self.currentDeviceIndexChanged.emit(self.currentDeviceIndex)
 
     def connect_device(self):
         try:
-            self._headset = ZoneHeadset()
+            self._set_available_devices(find_devices())
+
+            pid = None
+            if self._preferred_pid and any(
+                d.product_id == self._preferred_pid for d in self._available_devices
+            ):
+                pid = self._preferred_pid
+
+            self._headset = ZoneHeadset(product_id=pid)
             self._headset.connect()
-            
+
             if self._retry_timer.isActive():
                 self._retry_timer.stop()
-                
+
             self._usb_connected = True
+            self._set_device_name(self._headset.name or "")
+            self.currentDeviceIndexChanged.emit(self.currentDeviceIndex)
             self.usbConnectedChanged.emit(True)
             self.connectionStatusChanged.emit(True, "Connected")
             self.refresh_all()
             self.start_monitor()
         except Exception as e:
             self._usb_connected = False
+            self._set_device_name("")
             self.usbConnectedChanged.emit(False)
             self.connectionStatusChanged.emit(False, str(e))
-            
+
             if not self._retry_timer.isActive():
                 self._retry_timer.start()
+
+    def _set_device_name(self, name):
+        if self._device_name != name:
+            self._device_name = name
+            self.deviceNameChanged.emit(name)
 
     def refresh_all(self):
         if not self._headset:
@@ -142,6 +205,7 @@ class HeadsetController(QObject):
         self._update_balance(status.audio.balance)
         self._update_sidetone(status.audio.sidetone)
         self._update_battery(status.audio.battery_level, status.audio.charging)
+        self._update_component_batteries(status.audio)
         
         self._update_nc_mode(status.nc.nc_mode)
         self._update_mic_mute(status.nc.mic_muted)
@@ -164,17 +228,60 @@ class HeadsetController(QObject):
             self._monitor_thread = MonitorThread(self._headset)
             self._monitor_thread.event_received.connect(self._handle_event)
             self._monitor_thread.connection_lost.connect(self._handle_disconnect)
+            self._monitor_thread.battery_polled.connect(self._handle_battery_polled)
             self._monitor_thread.start()
+
+    def _handle_battery_polled(self, audio):
+        self._update_battery(audio.battery_level, audio.charging)
+        self._update_component_batteries(audio)
+
+    def _update_component_batteries(self, audio=None):
+        for attr, signal, value in (
+            ('_battery_left', self.batteryLeftChanged, getattr(audio, 'battery_left', None)),
+            ('_battery_right', self.batteryRightChanged, getattr(audio, 'battery_right', None)),
+            ('_battery_case', self.batteryCaseChanged, getattr(audio, 'battery_case', None)),
+        ):
+            val = -1 if value is None else int(value)
+            if getattr(self, attr) != val:
+                setattr(self, attr, val)
+                signal.emit(val)
 
     def _handle_disconnect(self, msg):
         self._usb_connected = False
+        self._set_device_name("")
         self.usbConnectedChanged.emit(False)
         self.connectionStatusChanged.emit(False, msg)
         self._headset = None
         self._low_battery_notified = False
-        
+        self._update_component_batteries(None)
+
         if not self._retry_timer.isActive():
             self._retry_timer.start()
+
+    @pyqtSlot(int)
+    def selectDevice(self, index):
+        if index < 0 or index >= len(self._available_devices):
+            return
+        target = self._available_devices[index]
+
+        self._preferred_pid = target.product_id
+        self._settings.setValue("device/preferredPid", target.product_id)
+
+        if (self._usb_connected and self._headset
+                and self._headset.product_id == target.product_id):
+            return
+
+        if self._monitor_thread:
+            self._monitor_thread.stop()
+            self._monitor_thread = None
+        if self._headset:
+            try:
+                self._headset.close()
+            except Exception:
+                pass
+            self._headset = None
+
+        self.connect_device()
 
     @pyqtSlot()
     def retryConnection(self):
@@ -412,7 +519,16 @@ class HeadsetController(QObject):
         
     @pyqtProperty(int, notify=batteryLevelChanged)
     def batteryLevel(self): return self._battery_level
-    
+
+    @pyqtProperty(int, notify=batteryLeftChanged)
+    def batteryLeft(self): return self._battery_left
+
+    @pyqtProperty(int, notify=batteryRightChanged)
+    def batteryRight(self): return self._battery_right
+
+    @pyqtProperty(int, notify=batteryCaseChanged)
+    def batteryCase(self): return self._battery_case
+
     @pyqtProperty(bool, notify=isChargingChanged)
     def isCharging(self): return self._is_charging
     
@@ -518,3 +634,17 @@ class HeadsetController(QObject):
 
     @pyqtProperty(bool, notify=usbConnectedChanged)
     def usbConnected(self): return self._usb_connected
+
+    @pyqtProperty(str, notify=deviceNameChanged)
+    def deviceName(self): return self._device_name
+
+    @pyqtProperty('QStringList', notify=availableDevicesChanged)
+    def availableDevices(self): return [d.name for d in self._available_devices]
+
+    @pyqtProperty(int, notify=currentDeviceIndexChanged)
+    def currentDeviceIndex(self):
+        if self._usb_connected and self._headset:
+            for i, d in enumerate(self._available_devices):
+                if d.product_id == self._headset.product_id:
+                    return i
+        return -1

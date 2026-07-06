@@ -89,9 +89,11 @@ def main():
     tray_icon.activated.connect(on_tray_activated)
     show_action.triggered.connect(show_window)
     quit_action.triggered.connect(app.quit)
+
+    notification_icon = QIcon.fromTheme("zoneout")
     
     def on_notification_requested(title, message):
-        tray_icon.showMessage(title, message, icon, 3000)
+        tray_icon.showMessage(title, message, notification_icon, 3000)
         
     controller.notificationRequested.connect(on_notification_requested)
 
@@ -133,8 +135,21 @@ def main():
         else:
             bal_str = f"Game {100 - bal}%/{bal}% Chat"
 
+        def pct(v):
+            return f"{v}%" if v >= 0 else "—"
+
+        if (controller.batteryLeft >= 0 or controller.batteryRight >= 0
+                or controller.batteryCase >= 0):
+            battery_str = (f"L {pct(controller.batteryLeft)} / R {pct(controller.batteryRight)}"
+                           f" / Case {pct(controller.batteryCase)}")
+        else:
+            battery_str = pct(controller.batteryLevel)
+        if controller.isCharging:
+            battery_str += " (Charging)"
+
         tooltip = (
-            f"ZoneOut\n\n"
+            f"ZoneOut — {controller.deviceName}\n\n"
+            f"Battery: {battery_str}\n"
             f"Volume: {controller.volume}\n"
             f"Balance: {bal_str}\n"
             f"Noise control mode: {nc_mode_str}\n"
@@ -157,7 +172,13 @@ def main():
     controller.bluetoothConnectedChanged.connect(update_tray_tooltip)
     controller.bluetoothEnabledChanged.connect(update_tray_tooltip)
     controller.usbConnectedChanged.connect(update_tray_tooltip)
-    
+    controller.deviceNameChanged.connect(update_tray_tooltip)
+    controller.batteryLevelChanged.connect(update_tray_tooltip)
+    controller.batteryLeftChanged.connect(update_tray_tooltip)
+    controller.batteryRightChanged.connect(update_tray_tooltip)
+    controller.batteryCaseChanged.connect(update_tray_tooltip)
+    controller.isChargingChanged.connect(update_tray_tooltip)
+
     update_tray_tooltip()
 
     sys.exit(app.exec())

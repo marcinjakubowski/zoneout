@@ -1,28 +1,39 @@
 from dataclasses import dataclass
 from enum import IntEnum, Enum
-from typing import Union
+from typing import Optional, Union
 
 
-class NcMode(IntEnum):
+class TolerantIntEnum(IntEnum):
+    """Maps values a device reports for unsupported features (e.g. 0xFF) to UNKNOWN."""
+    @classmethod
+    def _missing_(cls, value):
+        return cls.UNKNOWN
+
+
+class NcMode(TolerantIntEnum):
+    UNKNOWN = -1
     OFF = 0
     NOISE_CANCELLING = 1
     AMBIENT_SOUND = 2
 
 
-class BootNcMode(IntEnum):
+class BootNcMode(TolerantIntEnum):
+    UNKNOWN = -1
     OFF = 0
     NOISE_CANCELLING = 1
     AMBIENT_SOUND = 2
     REMEMBER_LAST = 3
 
 
-class BootBtMode(IntEnum):
+class BootBtMode(TolerantIntEnum):
+    UNKNOWN = -1
     OFF = 0
     ON = 1
     REMEMBER_LAST = 2
 
 
-class Language(IntEnum):
+class Language(TolerantIntEnum):
+    UNKNOWN = -1
     ENGLISH = 0
     JAPANESE = 1
     CHINESE = 2
@@ -36,6 +47,13 @@ class EventType(Enum):
     MIC_MUTE = "mic_muted"
     MIC_CONN = "mic_connected"
     BLUETOOTH = "bluetooth"
+
+
+@dataclass
+class DeviceInfo:
+    vendor_id: int
+    product_id: int
+    name: str
 
 
 @dataclass
@@ -57,6 +75,10 @@ class AudioStatus:
     sidetone: int
     battery_level: int
     charging: bool
+    # Per-component batteries for true-wireless models (None on headsets)
+    battery_left: Optional[int] = None
+    battery_right: Optional[int] = None
+    battery_case: Optional[int] = None
 
 
 @dataclass

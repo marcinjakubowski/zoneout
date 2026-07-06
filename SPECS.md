@@ -2,6 +2,31 @@
 
 This document details the reverse-engineered USB HID protocol for the **Sony INZONE H9 II** (Vendor ID `0x054c`, Product ID `0x0fa8`). This information is intended for developers wishing to implement driver support on other platforms.
 
+## Device Variations: INZONE Buds (`0x054c:0x0ec2`)
+
+The INZONE Buds speak the same request/response protocol. Write commands (volume, balance, sidetone, NC mode) are identical in format, checksum, and value scales; verified against hardware. Observed differences:
+
+* **Latency:** Status responses take 225-300ms (H9 II: under 60ms). Read budgets must account for this.
+* **N/A fields:** Features the Buds lack (e.g. BT Default on Boot) read as `0xFF` instead of a valid enum value.
+* **Audio Status (Req 6) layout** is shifted relative to the H9 II:
+
+  | Byte | Meaning |
+  | :--- | :--- |
+  | 14 | Charging Status (never observed non-zero; see battery notes below) |
+  | 15 | Battery Level (left bud; `0xFF` when docked/disconnected) |
+  | 17 | Battery Level (right bud; `0xFF` when docked/disconnected) |
+  | 19 | Battery Level (charging case) |
+  | 21 | Volume (0-30) |
+  | 23 | Game/Chat Balance (0-100) |
+  | 24 | Sidetone Level (0-10) |
+  | 26 | State Checksum (tracks volume/balance/sidetone writes) |
+
+  Battery notes (verified by dock/cable experiments): a docked bud disconnects
+  from the dongle and its level reads `0xFF`. The case has no radio link — its
+  level only refreshes at the moment a bud is docked (relayed by the bud), and
+  plugging/unplugging the case's charging cable produces no change in any
+  report. No live charging flag has been observed on the Buds.
+
 ## Protocol Overview
 
 The headset communicates via **USB HID Feature Reports** using 64-byte packets.

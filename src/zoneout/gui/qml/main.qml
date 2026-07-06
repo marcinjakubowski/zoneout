@@ -6,10 +6,10 @@ ApplicationWindow {
     id: window
     visible: true
     width: 530
-    height: 600
+    height: 650
     minimumWidth: 530
-    minimumHeight: 600
-    title: "ZoneOut"
+    minimumHeight: 650
+    title: headset.deviceName ? "ZoneOut — " + headset.deviceName : "ZoneOut"
     
     onClosing: (close) => {
         close.accepted = false
@@ -68,9 +68,28 @@ ApplicationWindow {
             RowLayout {
                 anchors.centerIn: parent
                 spacing: 20
-                
+
+                ComboBox {
+                    visible: headset.availableDevices.length > 1
+                    model: headset.availableDevices
+                    currentIndex: headset.currentDeviceIndex
+                    onActivated: (index) => headset.selectDevice(index)
+                    Layout.preferredWidth: 180
+                }
+
                 Label {
-                    text: "Battery: " + headset.batteryLevel + "%" + (headset.isCharging ? " (Charging)" : "")
+                    visible: headset.availableDevices.length <= 1
+                    text: headset.deviceName
+                    font.bold: true
+                }
+
+                Label {
+                    property bool triBattery: headset.batteryLeft >= 0 || headset.batteryRight >= 0 || headset.batteryCase >= 0
+                    function pct(v) { return v >= 0 ? v + "%" : "—" }
+                    text: (triBattery
+                           ? "L: " + pct(headset.batteryLeft) + "  R: " + pct(headset.batteryRight) + "  Case: " + pct(headset.batteryCase)
+                           : "Battery: " + pct(headset.batteryLevel))
+                          + (headset.isCharging ? " (Charging)" : "")
                     font.bold: true
                 }
             }
@@ -79,9 +98,30 @@ ApplicationWindow {
     
     // Disconnected Overlay
     Rectangle {
+        id: disconnectedOverlay
         anchors.fill: parent
         color: "#e6000000"
         visible: !headset.usbConnected
+        
+        property int retrySeconds: 5
+
+        Timer {
+            interval: 1000
+            repeat: true
+            running: parent.visible
+            onTriggered: {
+                if (disconnectedOverlay.retrySeconds > 1) {
+                    disconnectedOverlay.retrySeconds -= 1
+                } else {
+                    disconnectedOverlay.retrySeconds = 5
+                }
+            }
+            onRunningChanged: {
+                if (running) {
+                    disconnectedOverlay.retrySeconds = 5
+                }
+            }
+        }
         
         ColumnLayout {
             anchors.centerIn: parent
@@ -95,13 +135,16 @@ ApplicationWindow {
             }
             
             Label {
-                text: "Retrying in 5 seconds..."
+                text: "Retrying in " + disconnectedOverlay.retrySeconds + " seconds..."
                 color: "lightgray"
             }
 
             Button {
                 text: "Retry Now"
-                onClicked: headset.retryConnection()
+                onClicked: {
+                    headset.retryConnection()
+                    disconnectedOverlay.retrySeconds = 5
+                }
             }
         }
     }
