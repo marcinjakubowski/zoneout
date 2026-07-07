@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=ZoneOut
+GenericName=Headset Controller
+Comment=Control Sony INZONE headsets (volume, noise cancelling, battery)
+Exec=zoneout-gui
+Icon=zoneout
+Terminal=false
+Categories=AudioVideo;Audio;Settings;HardwareSettings;
+StartupNotify=false

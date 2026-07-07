@@ -5,6 +5,8 @@ import QtQuick.Layouts
 ScrollView {
     clip: true
     contentWidth: parent.width
+
+    required property var headset
     
     property var pendingCommand: null
 

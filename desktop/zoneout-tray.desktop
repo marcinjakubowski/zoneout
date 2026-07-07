@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ZoneOut (Tray)
+GenericName=Headset Controller
+Comment=Start ZoneOut minimized to the system tray
+Exec=zoneout-gui --tray
+Icon=zoneout
+Terminal=false
+Categories=AudioVideo;Audio;Settings;HardwareSettings;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

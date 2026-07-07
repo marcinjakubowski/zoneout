@@ -6,6 +6,8 @@ ScrollView {
     clip: true
     contentWidth: parent.width
 
+    required property var headset
+
     ColumnLayout {
         width: parent.width
         spacing: 20

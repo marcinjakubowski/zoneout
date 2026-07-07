@@ -6,7 +6,7 @@ from PyQt6.QtCore import QObject, pyqtSignal, pyqtProperty, QThread, pyqtSlot, Q
 from zoneout.device import ZoneHeadset, find_devices
 from zoneout.models import (
     NcMode, BootNcMode, BootBtMode, Language, HeadsetEvent, EventType,
-    PowerState, BluetoothState
+    PowerState, BluetoothState, DeviceInfo
 )
 from zoneout.exceptions import DeviceNotFoundError
 
@@ -88,17 +88,14 @@ class HeadsetController(QObject):
     connectionStatusChanged = pyqtSignal(bool, str)
     usbConnectedChanged = pyqtSignal(bool)
 
-    deviceNameChanged = pyqtSignal(str)
-    availableDevicesChanged = pyqtSignal()
-    currentDeviceIndexChanged = pyqtSignal(int)
-
-    def __init__(self, parent=None):
+    def __init__(self, device_info: DeviceInfo, parent=None):
         super().__init__(parent)
+        self._info = device_info
         self._headset: Optional[ZoneHeadset] = None
         self._monitor_thread: Optional[MonitorThread] = None
-        
+
         self._retry_timer = QTimer(self)
-        self._retry_timer.setInterval(5000) 
+        self._retry_timer.setInterval(5000)
         self._retry_timer.timeout.connect(self.connect_device)
         
         self._volume = 0
@@ -126,74 +123,68 @@ class HeadsetController(QObject):
         self._usb_connected = False
         
         self._settings = QSettings("ZoneOut", "HeadsetSettings")
-        
+
         self._low_battery_notified = False
-        self._user_battery_threshold = int(self._settings.value("notifications/batteryThreshold", 20))
-        
-        self._notify_mic_mute = self._settings.value("notifications/micMute", True, type=bool)
-        self._notify_mic_connect = self._settings.value("notifications/micConnect", True, type=bool)
-        self._notify_bt_connect = self._settings.value("notifications/btConnect", True, type=bool)
-        self._notify_bt_toggle = self._settings.value("notifications/btToggle", True, type=bool)
-        self._notify_battery = self._settings.value("notifications/battery", True, type=bool)
-        self._notify_charging = self._settings.value("notifications/charging", True, type=bool)
-        self._notify_nc = self._settings.value("notifications/nc", True, type=bool)
+        self._user_battery_threshold = int(self._setting("notifications/batteryThreshold", 20))
 
-        self._device_name = ""
-        self._available_devices = []
-        self._preferred_pid = self._settings.value("device/preferredPid", 0, type=int) or None
-
-        self._scan_timer = QTimer(self)
-        self._scan_timer.setInterval(3000)
-        self._scan_timer.timeout.connect(self._rescan_devices)
-        self._scan_timer.start()
+        self._notify_mic_mute = self._setting("notifications/micMute", True, bool)
+        self._notify_mic_connect = self._setting("notifications/micConnect", True, bool)
+        self._notify_bt_connect = self._setting("notifications/btConnect", True, bool)
+        self._notify_bt_toggle = self._setting("notifications/btToggle", True, bool)
+        self._notify_battery = self._setting("notifications/battery", True, bool)
+        self._notify_charging = self._setting("notifications/charging", True, bool)
+        self._notify_nc = self._setting("notifications/nc", True, bool)
 
         QTimer.singleShot(0, self.connect_device)
 
-    def _rescan_devices(self):
-        self._set_available_devices(find_devices())
+    def _skey(self, key: str) -> str:
+        return f"device_{self._info.product_id:04x}/{key}"
 
-    def _set_available_devices(self, devices):
-        if [d.product_id for d in devices] != [d.product_id for d in self._available_devices]:
-            self._available_devices = devices
-            self.availableDevicesChanged.emit()
-            self.currentDeviceIndexChanged.emit(self.currentDeviceIndex)
+    def _setting(self, key, default, type_=None):
+        # Per-device value, falling back to the pre-multi-device global key.
+        legacy = self._settings.value(key, default, type=type_) if type_ \
+            else self._settings.value(key, default)
+        if type_:
+            return self._settings.value(self._skey(key), legacy, type=type_)
+        return self._settings.value(self._skey(key), legacy)
+
+    def _save_setting(self, key, value):
+        self._settings.setValue(self._skey(key), value)
+
+    def shutdown(self):
+        self._retry_timer.stop()
+        if self._monitor_thread:
+            self._monitor_thread.stop()
+            self._monitor_thread = None
+        if self._headset:
+            try:
+                self._headset.close()
+            except Exception:
+                pass
+            self._headset = None
 
     def connect_device(self):
         try:
-            self._set_available_devices(find_devices())
-
-            pid = None
-            if self._preferred_pid and any(
-                d.product_id == self._preferred_pid for d in self._available_devices
-            ):
-                pid = self._preferred_pid
-
-            self._headset = ZoneHeadset(product_id=pid)
+            self._headset = ZoneHeadset(
+                vendor_id=self._info.vendor_id, product_id=self._info.product_id
+            )
             self._headset.connect()
 
             if self._retry_timer.isActive():
                 self._retry_timer.stop()
 
             self._usb_connected = True
-            self._set_device_name(self._headset.name or "")
-            self.currentDeviceIndexChanged.emit(self.currentDeviceIndex)
             self.usbConnectedChanged.emit(True)
             self.connectionStatusChanged.emit(True, "Connected")
             self.refresh_all()
             self.start_monitor()
         except Exception as e:
             self._usb_connected = False
-            self._set_device_name("")
             self.usbConnectedChanged.emit(False)
             self.connectionStatusChanged.emit(False, str(e))
 
             if not self._retry_timer.isActive():
                 self._retry_timer.start()
-
-    def _set_device_name(self, name):
-        if self._device_name != name:
-            self._device_name = name
-            self.deviceNameChanged.emit(name)
 
     def refresh_all(self):
         if not self._headset:
@@ -248,7 +239,6 @@ class HeadsetController(QObject):
 
     def _handle_disconnect(self, msg):
         self._usb_connected = False
-        self._set_device_name("")
         self.usbConnectedChanged.emit(False)
         self.connectionStatusChanged.emit(False, msg)
         self._headset = None
@@ -257,31 +247,6 @@ class HeadsetController(QObject):
 
         if not self._retry_timer.isActive():
             self._retry_timer.start()
-
-    @pyqtSlot(int)
-    def selectDevice(self, index):
-        if index < 0 or index >= len(self._available_devices):
-            return
-        target = self._available_devices[index]
-
-        self._preferred_pid = target.product_id
-        self._settings.setValue("device/preferredPid", target.product_id)
-
-        if (self._usb_connected and self._headset
-                and self._headset.product_id == target.product_id):
-            return
-
-        if self._monitor_thread:
-            self._monitor_thread.stop()
-            self._monitor_thread = None
-        if self._headset:
-            try:
-                self._headset.close()
-            except Exception:
-                pass
-            self._headset = None
-
-        self.connect_device()
 
     @pyqtSlot()
     def retryConnection(self):
@@ -552,7 +517,7 @@ class HeadsetController(QObject):
     @pyqtSlot(int)
     def setBatteryThreshold(self, val):
         self._user_battery_threshold = val
-        self._settings.setValue("notifications/batteryThreshold", val)
+        self._save_setting("notifications/batteryThreshold", val)
         self.batteryThresholdChanged.emit(val)
 
     notifyMicMuteChanged = pyqtSignal(bool)
@@ -566,7 +531,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnMicMute(self, val):
         self._notify_mic_mute = val
-        self._settings.setValue("notifications/micMute", val)
+        self._save_setting("notifications/micMute", val)
         self.notifyMicMuteChanged.emit(val)
 
     @pyqtProperty(bool, notify=notifyMicConnectChanged)
@@ -575,7 +540,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnMicConnect(self, val):
         self._notify_mic_connect = val
-        self._settings.setValue("notifications/micConnect", val)
+        self._save_setting("notifications/micConnect", val)
         self.notifyMicConnectChanged.emit(val)
 
     @pyqtProperty(bool, notify=notifyBtConnectChanged)
@@ -584,7 +549,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnBtConnect(self, val):
         self._notify_bt_connect = val
-        self._settings.setValue("notifications/btConnect", val)
+        self._save_setting("notifications/btConnect", val)
         self.notifyBtConnectChanged.emit(val)
         
     @pyqtProperty(bool, notify=notifyBtToggleChanged)
@@ -593,7 +558,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnBtToggle(self, val):
         self._notify_bt_toggle = val
-        self._settings.setValue("notifications/btToggle", val)
+        self._save_setting("notifications/btToggle", val)
         self.notifyBtToggleChanged.emit(val)
 
     notifyBatteryChanged = pyqtSignal(bool)
@@ -605,7 +570,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnBattery(self, val):
         self._notify_battery = val
-        self._settings.setValue("notifications/battery", val)
+        self._save_setting("notifications/battery", val)
         self.notifyBatteryChanged.emit(val)
 
     @pyqtProperty(bool, notify=notifyChargingChanged)
@@ -614,7 +579,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnCharging(self, val):
         self._notify_charging = val
-        self._settings.setValue("notifications/charging", val)
+        self._save_setting("notifications/charging", val)
         self.notifyChargingChanged.emit(val)
 
     notifyNcChanged = pyqtSignal(bool)
@@ -625,7 +590,7 @@ class HeadsetController(QObject):
     @pyqtSlot(bool)
     def setNotifyOnNc(self, val):
         self._notify_nc = val
-        self._settings.setValue("notifications/nc", val)
+        self._save_setting("notifications/nc", val)
         self.notifyNcChanged.emit(val)
 
     @pyqtSlot()
@@ -635,16 +600,55 @@ class HeadsetController(QObject):
     @pyqtProperty(bool, notify=usbConnectedChanged)
     def usbConnected(self): return self._usb_connected
 
-    @pyqtProperty(str, notify=deviceNameChanged)
-    def deviceName(self): return self._device_name
+    @pyqtProperty(str, constant=True)
+    def deviceName(self): return self._info.name
 
-    @pyqtProperty('QStringList', notify=availableDevicesChanged)
-    def availableDevices(self): return [d.name for d in self._available_devices]
 
-    @pyqtProperty(int, notify=currentDeviceIndexChanged)
-    def currentDeviceIndex(self):
-        if self._usb_connected and self._headset:
-            for i, d in enumerate(self._available_devices):
-                if d.product_id == self._headset.product_id:
-                    return i
-        return -1
+class DeviceManager(QObject):
+    """Owns one HeadsetController per connected supported receiver."""
+
+    controllersChanged = pyqtSignal()
+    notificationRequested = pyqtSignal(str, str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._controllers = {}  # (vid, pid) -> HeadsetController
+
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setInterval(3000)
+        self._scan_timer.timeout.connect(self.rescan)
+        self._scan_timer.start()
+
+        QTimer.singleShot(0, self.rescan)
+
+    @pyqtSlot()
+    def rescan(self):
+        found = {(d.vendor_id, d.product_id): d for d in find_devices()}
+        changed = False
+
+        for key in list(self._controllers):
+            if key not in found:
+                ctrl = self._controllers.pop(key)
+                ctrl.shutdown()
+                ctrl.deleteLater()
+                changed = True
+
+        for key, info in found.items():
+            if key not in self._controllers:
+                ctrl = HeadsetController(info, self)
+                ctrl.notificationRequested.connect(
+                    lambda title, msg, name=info.name:
+                        self.notificationRequested.emit(f"{name} — {title}", msg)
+                )
+                self._controllers[key] = ctrl
+                changed = True
+
+        if changed:
+            self._controllers = dict(
+                sorted(self._controllers.items(), key=lambda kv: kv[1].deviceName)
+            )
+            self.controllersChanged.emit()
+
+    @pyqtProperty('QVariantList', notify=controllersChanged)
+    def controllers(self):
+        return list(self._controllers.values())

@@ -25,7 +25,9 @@ The INZONE Buds speak the same request/response protocol. Write commands (volume
   from the dongle and its level reads `0xFF`. The case has no radio link — its
   level only refreshes at the moment a bud is docked (relayed by the bud), and
   plugging/unplugging the case's charging cable produces no change in any
-  report. No live charging flag has been observed on the Buds.
+  report. No live charging flag has been observed on the Buds. When no bud is
+  connected (both docked, or auto-powered-off by wear detection), the receiver
+  stays enumerated on USB but stops answering status requests entirely.
 
 ## Protocol Overview
 

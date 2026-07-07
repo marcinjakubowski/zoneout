@@ -54,15 +54,44 @@ The package installs the `zoneout` command.
 
 ### Selecting a Device
 
-With a single supported device connected, `zoneout` uses it automatically. With multiple connected, it defaults to the first detected; use `--device` to target a specific model:
+With a single supported device connected, `zoneout` uses it automatically — no flags needed. With multiple connected:
+
+* `--get-all` and `--get` report **all** connected devices (`--get` prefixes each line with the model name).
+* `--monitor` listens to all connected devices, prefixing events with the model name.
+* `--set` requires `--device` to pick the target.
 
 ```bash
 zoneout --list-devices
 # INZONE Buds  (054c:0ec2)
 # INZONE H9 II  (054c:0fa8)
 
+zoneout --get battery
+# INZONE Buds: 94
+# INZONE H9 II: 60
+
 zoneout --device buds --get battery
 zoneout --device h9 --set volume 20
+```
+
+The GUI shows one pane per connected receiver, side by side, and adapts as receivers are plugged or unplugged.
+
+### GUI Launchers & Autostart
+
+`zoneout-gui --tray` starts minimized to the system tray. Only one GUI instance runs at a time — launching a second one shows the existing instance's window instead.
+
+Desktop launchers are provided in `desktop/`:
+
+* `zoneout.desktop` — opens the full GUI
+* `zoneout-tray.desktop` — starts tray-only, intended for autostart
+
+Install them (adjust `Exec=` to an absolute path if `~/.local/bin` is not on your session PATH):
+
+```bash
+cp desktop/*.desktop ~/.local/share/applications/
+cp src/zoneout/gui/resources/zoneout.png ~/.local/share/icons/hicolor/512x512/apps/zoneout.png
+
+# start in tray on login:
+cp desktop/zoneout-tray.desktop ~/.config/autostart/
 ```
 
 ### Reading Status
