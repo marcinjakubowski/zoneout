@@ -81,13 +81,13 @@ The GUI shows one pane per connected receiver, side by side, and adapts as recei
 
 Desktop launchers are provided in `desktop/`:
 
-* `zoneout.desktop` — opens the full GUI
-* `zoneout-tray.desktop` — starts tray-only, intended for autostart
+* `zoneout.desktop` — opens the full GUI; install to your app menu
+* `zoneout-tray.desktop` — starts tray-only, for autostart. It carries `NoDisplay=true` so it stays out of app menus; put it only in `~/.config/autostart/`.
 
-Install them (adjust `Exec=` to an absolute path if `~/.local/bin` is not on your session PATH):
+Install (adjust `Exec=` to an absolute path if `~/.local/bin` is not on your session PATH):
 
 ```bash
-cp desktop/*.desktop ~/.local/share/applications/
+cp desktop/zoneout.desktop ~/.local/share/applications/
 cp src/zoneout/gui/resources/zoneout.png ~/.local/share/icons/hicolor/512x512/apps/zoneout.png
 
 # start in tray on login:

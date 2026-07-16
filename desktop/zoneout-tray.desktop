@@ -9,3 +9,4 @@ Terminal=false
 Categories=AudioVideo;Audio;Settings;HardwareSettings;
 StartupNotify=false
 X-GNOME-Autostart-enabled=true
+NoDisplay=true
