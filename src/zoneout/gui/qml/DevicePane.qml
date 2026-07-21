@@ -6,23 +6,67 @@ Item {
     id: pane
     required property var headset
 
+    // Receiver enumerated but couldn't be opened (permissions/udev) vs.
+    // receiver open but no headset linked to it wirelessly.
+    readonly property bool receiverError: !headset.usbConnected
+    readonly property bool linked: headset.usbConnected && headset.headsetConnected
+
+    readonly property string statusText: receiverError
+        ? "Receiver error — check permissions, retrying…"
+        : (linked ? "Connected" : "Not connected — headset is off or out of range")
+
     ColumnLayout {
         anchors.fill: parent
-        visible: pane.headset.usbConnected
         spacing: 0
 
-        Label {
-            text: pane.headset.deviceName
-            font.pixelSize: 18
-            font.bold: true
+        RowLayout {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 10
-            Layout.bottomMargin: 6
+            spacing: 8
+
+            Rectangle {
+                width: 12
+                height: 12
+                radius: 6
+                Layout.alignment: Qt.AlignVCenter
+                color: pane.receiverError ? "#c62828"
+                     : (pane.linked ? "#43a047" : "#1a1a1a")
+                border.width: 1
+                border.color: pane.linked ? "#2e7d32" : "#808080"
+
+                ToolTip.visible: dotHover.hovered
+                ToolTip.text: pane.statusText
+                HoverHandler { id: dotHover }
+            }
+
+            Label {
+                text: pane.headset.deviceName
+                font.pixelSize: 18
+                font.bold: true
+            }
+        }
+
+        Label {
+            text: pane.statusText
+            visible: !pane.linked
+            opacity: 0.65
+            font.pixelSize: 12
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: 2
+        }
+
+        Button {
+            text: "Retry Now"
+            visible: pane.receiverError
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: 4
+            onClicked: pane.headset.retryConnection()
         }
 
         TabBar {
             id: bar
             Layout.fillWidth: true
+            Layout.topMargin: 6
 
             TabButton {
                 text: "Controls"
@@ -49,8 +93,10 @@ Item {
             Layout.fillHeight: true
             currentIndex: bar.currentIndex
 
-            ControlsTab { headset: pane.headset }
-            AdvancedTab { headset: pane.headset }
+            // Device-bound tabs are inert without a linked headset;
+            // notification preferences are local and always editable.
+            ControlsTab { headset: pane.headset; enabled: pane.linked }
+            AdvancedTab { headset: pane.headset; enabled: pane.linked }
             NotificationsTab { headset: pane.headset }
         }
 
@@ -67,38 +113,6 @@ Item {
                        : "Battery: " + pct(pane.headset.batteryLevel))
                       + (pane.headset.isCharging ? " (Charging)" : "")
                 font.bold: true
-            }
-        }
-    }
-
-    // Receiver present but headset connection failed (e.g. permissions)
-    Rectangle {
-        anchors.fill: parent
-        color: "#e6000000"
-        visible: !pane.headset.usbConnected
-
-        ColumnLayout {
-            anchors.centerIn: parent
-            spacing: 10
-
-            Label {
-                text: pane.headset.deviceName
-                color: "white"
-                font.pixelSize: 20
-                font.bold: true
-                Layout.alignment: Qt.AlignHCenter
-            }
-
-            Label {
-                text: "Connecting..."
-                color: "lightgray"
-                Layout.alignment: Qt.AlignHCenter
-            }
-
-            Button {
-                text: "Retry Now"
-                Layout.alignment: Qt.AlignHCenter
-                onClicked: pane.headset.retryConnection()
             }
         }
     }

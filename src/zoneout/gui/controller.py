@@ -8,46 +8,81 @@ from zoneout.models import (
     NcMode, BootNcMode, BootBtMode, Language, HeadsetEvent, EventType,
     PowerState, BluetoothState, DeviceInfo
 )
-from zoneout.exceptions import DeviceNotFoundError
+from zoneout.exceptions import DeviceNotFoundError, ProtocolError
 
 
 class MonitorThread(QThread):
     event_received = pyqtSignal(object)
-    connection_lost = pyqtSignal(str)
+    connection_lost = pyqtSignal(str)  # receiver itself gone (unplug/IO error)
     battery_polled = pyqtSignal(object)  # AudioStatus
+    status_read = pyqtSignal(object)  # HeadsetFullStatus, on link (re)establish
+    link_changed = pyqtSignal(bool)  # headset answering over the wireless link
 
-    BATTERY_POLL_SECONDS = 30
+    BATTERY_POLL_SECONDS = 10
+    LINK_PROBE_SECONDS = 3
 
     def __init__(self, headset: ZoneHeadset):
         super().__init__()
         self.headset = headset
         self._running = True
+        self._linked = None  # unknown until first probe
+
+    def _set_linked(self, up: bool):
+        if self._linked != up:
+            self._linked = up
+            self.link_changed.emit(up)
 
     def run(self):
-        last_poll = time.monotonic()
+        # The receiver stays enumerated on USB while the headset is powered
+        # off, but stops answering status requests — a read timeout
+        # (ProtocolError) therefore means "link down", not "receiver gone".
         while self._running:
+            try:
+                status = self.headset.get_all_data()
+            except ProtocolError:
+                self._set_linked(False)
+                for _ in range(self.LINK_PROBE_SECONDS):
+                    if not self._running:
+                        return
+                    time.sleep(1)
+                continue
+            except DeviceNotFoundError:
+                if self._running:
+                    self.connection_lost.emit("Device disconnected")
+                return
+            except Exception as e:
+                if self._running:
+                    self.connection_lost.emit(str(e))
+                return
+
+            self._set_linked(True)
+            self.status_read.emit(status)
+
+            last_poll = time.monotonic()
             try:
                 for event in self.headset.listen():
                     if not self._running:
-                        break
+                        return
                     if event is None:
                         # Idle tick: refresh battery here (this thread owns
                         # device reads; the GUI thread must not interleave).
+                        # The poll doubles as a link check.
                         if time.monotonic() - last_poll >= self.BATTERY_POLL_SECONDS:
-                            self.battery_polled.emit(self.headset.get_audio_status())
+                            try:
+                                self.battery_polled.emit(self.headset.get_audio_status())
+                            except ProtocolError:
+                                break  # link dropped; back to probing
                             last_poll = time.monotonic()
                         continue
                     self.event_received.emit(event)
             except DeviceNotFoundError:
                 if self._running:
                     self.connection_lost.emit("Device disconnected")
-                break
+                return
             except Exception as e:
                 if self._running:
                     self.connection_lost.emit(str(e))
-                break
-
-            time.sleep(1)
+                return
 
     def stop(self):
         self._running = False
@@ -87,6 +122,7 @@ class HeadsetController(QObject):
     
     connectionStatusChanged = pyqtSignal(bool, str)
     usbConnectedChanged = pyqtSignal(bool)
+    headsetConnectedChanged = pyqtSignal(bool)
 
     def __init__(self, device_info: DeviceInfo, parent=None):
         super().__init__(parent)
@@ -121,7 +157,8 @@ class HeadsetController(QObject):
         self._bt_enabled = False
 
         self._usb_connected = False
-        
+        self._headset_connected = False
+
         self._settings = QSettings("ZoneOut", "HeadsetSettings")
 
         self._low_battery_notified = False
@@ -164,6 +201,8 @@ class HeadsetController(QObject):
             self._headset = None
 
     def connect_device(self):
+        # Opens the USB receiver only. Whether a headset is actually linked
+        # to it wirelessly is discovered by MonitorThread (link_changed).
         try:
             self._headset = ZoneHeadset(
                 vendor_id=self._info.vendor_id, product_id=self._info.product_id
@@ -176,9 +215,9 @@ class HeadsetController(QObject):
             self._usb_connected = True
             self.usbConnectedChanged.emit(True)
             self.connectionStatusChanged.emit(True, "Connected")
-            self.refresh_all()
             self.start_monitor()
         except Exception as e:
+            self._headset = None
             self._usb_connected = False
             self.usbConnectedChanged.emit(False)
             self.connectionStatusChanged.emit(False, str(e))
@@ -186,12 +225,7 @@ class HeadsetController(QObject):
             if not self._retry_timer.isActive():
                 self._retry_timer.start()
 
-    def refresh_all(self):
-        if not self._headset:
-            return
-            
-        status = self._headset.get_all_data()
-        
+    def _handle_status_read(self, status):
         self._update_volume(status.audio.volume)
         self._update_balance(status.audio.balance)
         self._update_sidetone(status.audio.sidetone)
@@ -220,7 +254,25 @@ class HeadsetController(QObject):
             self._monitor_thread.event_received.connect(self._handle_event)
             self._monitor_thread.connection_lost.connect(self._handle_disconnect)
             self._monitor_thread.battery_polled.connect(self._handle_battery_polled)
+            self._monitor_thread.status_read.connect(self._handle_status_read)
+            self._monitor_thread.link_changed.connect(self._handle_link_changed)
             self._monitor_thread.start()
+
+    def _handle_link_changed(self, up: bool):
+        if self._headset_connected != up:
+            self._headset_connected = up
+            self.headsetConnectedChanged.emit(up)
+        if not up:
+            # Reset battery state directly — going through _update_battery
+            # would emit "Charging stopped"/low-battery notifications.
+            self._low_battery_notified = False
+            if self._battery_level != -1:
+                self._battery_level = -1
+                self.batteryLevelChanged.emit(-1)
+            if self._is_charging:
+                self._is_charging = False
+                self.isChargingChanged.emit(False)
+            self._update_component_batteries(None)
 
     def _handle_battery_polled(self, audio):
         self._update_battery(audio.battery_level, audio.charging)
@@ -242,8 +294,7 @@ class HeadsetController(QObject):
         self.usbConnectedChanged.emit(False)
         self.connectionStatusChanged.emit(False, msg)
         self._headset = None
-        self._low_battery_notified = False
-        self._update_component_batteries(None)
+        self._handle_link_changed(False)
 
         if not self._retry_timer.isActive():
             self._retry_timer.start()
@@ -312,7 +363,7 @@ class HeadsetController(QObject):
             self._battery_level = level
             self.batteryLevelChanged.emit(level)
             
-            if self._notify_battery and not charging and level <= self._user_battery_threshold and not self._low_battery_notified:
+            if self._notify_battery and not charging and 0 <= level <= self._user_battery_threshold and not self._low_battery_notified:
                 self.notificationRequested.emit("Low Battery", f"Battery is at {level}%")
                 self._low_battery_notified = True
             elif level > self._user_battery_threshold:
@@ -599,6 +650,9 @@ class HeadsetController(QObject):
 
     @pyqtProperty(bool, notify=usbConnectedChanged)
     def usbConnected(self): return self._usb_connected
+
+    @pyqtProperty(bool, notify=headsetConnectedChanged)
+    def headsetConnected(self): return self._headset_connected
 
     @pyqtProperty(str, constant=True)
     def deviceName(self): return self._info.name

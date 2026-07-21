@@ -54,7 +54,10 @@ def balance_text(ctrl):
 
 def device_section(ctrl):
     if not ctrl.usbConnected:
-        return f"{ctrl.deviceName}\n  Disconnected"
+        return f"{ctrl.deviceName}\n  Receiver error"
+
+    if not ctrl.headsetConnected:
+        return f"{ctrl.deviceName}\n  Not connected"
 
     if not ctrl.micConnected:
         mic_status = "Disconnected"
@@ -188,10 +191,12 @@ def main():
         device_actions.clear()
 
         for ctrl in controllers:
-            if ctrl.usbConnected:
-                label = f"{ctrl.deviceName} — {battery_text(ctrl)}"
+            if not ctrl.usbConnected:
+                label = f"{ctrl.deviceName} — Receiver error"
+            elif not ctrl.headsetConnected:
+                label = f"{ctrl.deviceName} — Not connected"
             else:
-                label = f"{ctrl.deviceName} — Disconnected"
+                label = f"{ctrl.deviceName} — {battery_text(ctrl)}"
             action = QAction(label, tray_menu)
             action.setEnabled(False)
             tray_menu.insertAction(show_action, action)
@@ -212,7 +217,8 @@ def main():
                 "volumeChanged", "balanceChanged", "ncModeChanged",
                 "micMutedChanged", "micConnectedChanged",
                 "bluetoothConnectedChanged", "bluetoothEnabledChanged",
-                "usbConnectedChanged", "batteryLevelChanged",
+                "usbConnectedChanged", "headsetConnectedChanged",
+                "batteryLevelChanged",
                 "batteryLeftChanged", "batteryRightChanged",
                 "batteryCaseChanged", "isChargingChanged",
             ):
